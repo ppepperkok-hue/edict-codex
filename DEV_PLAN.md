@@ -43,7 +43,7 @@
 | M2 | 服务端适配：配置路径、权限中间件、官员统计、备份/恢复 | 完成 | v0.2.0 |
 | M3 | Codex 编排层：AGENTS.md 协议 + 12 角色模板 | 完成 | v0.3.0 |
 | M4 | 完整功能接通：模型/技能/议政/早朝/模板/奏折 | 完成 | v0.4.0 |
-| M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 进行中 | v0.5.0 |
+| M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 完成 | v0.5.0 |
 
 ## 决策记录（ADR）
 
@@ -77,7 +77,7 @@
 python -m pytest tests/ -v
 ```
 
-当前基线：80 passed（M5 收口前）。
+当前基线：81 passed（M5 终版）。
 
 ## 回滚速查
 
@@ -99,9 +99,9 @@ python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 - [x] README/ROADMAP/CONTRIBUTING 收口；删除上游 OpenClaw 版 README_EN/JA/WINDOWS_INSTALL_CN。
 - [x] CLI Windows GBK 控制台兼容（UTF-8 重配置 + --help）与回归测试。
 - [x] skills/{role}/ 占位目录，官员总览显示 12 角色已配置。
-- [ ] M5 端到端演练（含门下封驳路径）。
-- [ ] M5 回滚演练（代码 revert / 数据 restore / 配置 reset）。
-- [ ] 都察院终审 v0.4.0→v0.5.0 diff，Critical/必须修清零。
+- [x] M5 端到端演练（含门下封驳路径）。
+- [x] M5 回滚演练（代码 revert / 数据 restore / 配置 reset）。
+- [x] 都察院终审 v0.4.0→v0.5.0 diff，Critical/必须修清零。
 - [ ] 终审通过后打 tag v0.5.0 并推送。
 
 > 以下两条为 M4 完成时的旧记录，保留作历史参考：
