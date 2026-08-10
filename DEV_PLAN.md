@@ -42,7 +42,7 @@
 | M1 | 骨架与工程基座：源码搬运、git 仓库、pytest 基线 | 完成 | v0.1.0 |
 | M2 | 服务端适配：配置路径、权限中间件、官员统计、备份/恢复 | 完成 | v0.2.0 |
 | M3 | Codex 编排层：AGENTS.md 协议 + 12 角色模板 | 完成 | v0.3.0 |
-| M4 | 完整功能接通：模型/技能/议政/早朝/模板/奏折 | 待开始 | v0.4.0 |
+| M4 | 完整功能接通：模型/技能/议政/早朝/模板/奏折 | 完成 | v0.4.0 |
 | M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 待开始 | v0.5.0 |
 
 ## 决策记录（ADR）
@@ -90,8 +90,7 @@ python scripts/restore_data.py --list
 python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 ```
 
-## 遗留 TODO（M4 范围）
+## 遗留 TODO（M5 范围）
 
-- 朝堂议政配置源：`dashboard/court_discuss.py` 仍优先读 `~/.openclaw/openclaw.json` 与 Copilot token 文件，需改为项目配置/环境变量（已有环境变量 fallback）。
-- 旧版前端 `dashboard/dashboard.html` 仍有 Gateway/OpenClaw 文案，确认是否被服务提供并清理或标注废弃。
-- `agents.json` 与 README 仍为上游 OpenClaw 形态，M5 收口时更新。
+- \gents.json\ 与 README 仍为上游 OpenClaw 形态，M5 收口时更新。
+- M4 已完成：议政模块改为项目 \data/llm_config.json\ + EDICT_LLM_* 环境变量；删除旧版 \dashboard/dashboard.html\（服务端仅提供 React dist）；server 内置早朝定时线程（默认每日 08:00，读 morning_brief_config.json 的 schedule）。

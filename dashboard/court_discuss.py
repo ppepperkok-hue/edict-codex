@@ -298,113 +298,46 @@ def _pick_chat_model(models: list[dict]) -> str | None:
     return ids[0] if ids else None
 
 
-def _read_copilot_token() -> str | None:
-    """读取 openclaw 管理的 GitHub Copilot token。"""
-    token_path = os.path.expanduser('~/.openclaw/credentials/github-copilot.token.json')
-    if not os.path.exists(token_path):
-        return None
-    try:
-        with open(token_path) as f:
-            cred = json.load(f)
-        token = cred.get('token', '')
-        expires = cred.get('expiresAt', 0)
-        # 检查 token 是否过期（毫秒时间戳）
-        import time
-        if expires and time.time() * 1000 > expires:
-            logger.warning('Copilot token expired')
-            return None
-        return token if token else None
-    except Exception as e:
-        logger.warning('Failed to read copilot token: %s', e)
-        return None
-
-
 def _get_llm_config() -> dict | None:
-    """从 openclaw 配置读取 LLM 设置，支持环境变量覆盖。
+    """Resolve LLM settings for court discussion.
 
-    优先级: 环境变量 > github-copilot token > 本地 copilot-proxy > anthropic > 其他 provider
+    Priority:
+      1. data/llm_config.json  ({"api_key", "base_url", "model", "api_type"})
+      2. EDICT_LLM_API_KEY / EDICT_LLM_BASE_URL / EDICT_LLM_MODEL env vars
+      3. Legacy OPENCLAW_LLM_* env vars (backward compatible)
+    Returns None when nothing is configured.
     """
-    # 1. 环境变量覆盖（保留向后兼容）
-    env_key = os.environ.get('OPENCLAW_LLM_API_KEY', '')
-    if env_key:
-        return {
-            'api_key': env_key,
-            'base_url': os.environ.get('OPENCLAW_LLM_BASE_URL', 'https://api.openai.com/v1'),
-            'model': os.environ.get('OPENCLAW_LLM_MODEL', 'gpt-4o-mini'),
-            'api_type': 'openai',
-        }
+    import pathlib
 
-    # 2. GitHub Copilot token（最优先 — 免费、稳定、无需额外配置）
-    copilot_token = _read_copilot_token()
-    if copilot_token:
-        # 选一个 copilot 支持的模型
-        model = 'gpt-4o'
-        logger.info('Court discuss using github-copilot token, model=%s', model)
-        return {
-            'api_key': copilot_token,
-            'base_url': 'https://api.githubcopilot.com',
-            'model': model,
-            'api_type': 'github-copilot',
-        }
+    project_root = pathlib.Path(__file__).resolve().parent.parent
+    llm_cfg = project_root / "data" / "llm_config.json"
+    if llm_cfg.exists():
+        try:
+            cfg = json.loads(llm_cfg.read_text(encoding="utf-8"))
+            api_key = str(cfg.get("api_key", "") or "").strip()
+            base_url = str(cfg.get("base_url", "") or "").strip()
+            model = str(cfg.get("model", "") or "").strip()
+            if base_url and model:
+                return {
+                    "api_key": api_key,
+                    "base_url": base_url,
+                    "model": model,
+                    "api_type": str(cfg.get("api_type", "openai") or "openai"),
+                }
+        except Exception as e:
+            logger.warning("Failed to read data/llm_config.json: %s", e)
 
-    # 3. 从 ~/.openclaw/openclaw.json 读取其他 provider 配置
-    openclaw_cfg = os.path.expanduser('~/.openclaw/openclaw.json')
-    if not os.path.exists(openclaw_cfg):
-        return None
-
-    try:
-        with open(openclaw_cfg) as f:
-            cfg = json.load(f)
-
-        providers = cfg.get('models', {}).get('providers', {})
-
-        # 按优先级排序：copilot-proxy > anthropic > 其他
-        ordered = []
-        for preferred in ['copilot-proxy', 'anthropic']:
-            if preferred in providers:
-                ordered.append(preferred)
-        ordered.extend(k for k in providers if k not in ordered)
-
-        for name in ordered:
-            prov = providers.get(name)
-            if not prov:
-                continue
-            api_type = prov.get('api', '')
-            base_url = prov.get('baseUrl', '')
-            api_key = prov.get('apiKey', '')
-            if not base_url:
-                continue
-
-            # 跳过无 key 且非本地的 provider
-            if not api_key or api_key == 'n/a':
-                if 'localhost' not in base_url and '127.0.0.1' not in base_url:
-                    continue
-
-            model_id = _pick_chat_model(prov.get('models', []))
-            if not model_id:
-                continue
-
-            # 本地代理先探测是否可用
-            if 'localhost' in base_url or '127.0.0.1' in base_url:
-                try:
-                    import urllib.request
-                    probe = urllib.request.Request(base_url.rstrip('/') + '/models', method='GET')
-                    urllib.request.urlopen(probe, timeout=2)
-                except Exception:
-                    logger.info('Skipping provider=%s (not reachable)', name)
-                    continue
-
-            logger.info('Court discuss using openclaw provider=%s model=%s api=%s', name, model_id, api_type)
-            send_auth = prov.get('authHeader', True) is not False and api_key not in ('', 'n/a')
+    for prefix in ("EDICT_LLM", "OPENCLAW_LLM"):
+        env_key = os.environ.get(f"{prefix}_API_KEY", "")
+        if env_key:
             return {
-                'api_key': api_key if send_auth else '',
-                'base_url': base_url,
-                'model': model_id,
-                'api_type': api_type,
+                "api_key": env_key,
+                "base_url": os.environ.get(
+                    f"{prefix}_BASE_URL", "https://api.openai.com/v1"
+                ),
+                "model": os.environ.get(f"{prefix}_MODEL", "gpt-4o-mini"),
+                "api_type": "openai",
             }
-    except Exception as e:
-        logger.warning('Failed to read openclaw config: %s', e)
-
     return None
 
 

@@ -4,7 +4,7 @@
 Port: 7891 (可通过 --port 修改)
 
 Endpoints:
-  GET  /                       → dashboard.html
+  GET  /                       → dist/index.html (React)
   GET  /api/live-status        → data/live_status.json
   GET  /api/agent-config       → data/agent_config.json
   POST /api/set-model          → {agentId, model}
@@ -2660,6 +2660,37 @@ def main():
                 log.warning(f'定时巡检异常: {e}')
     threading.Thread(target=_periodic_scheduler_scan, daemon=True).start()
     log.info('🔍 定时巡检已启动（每120秒）')
+
+    # 早朝定时：每天按 morning_brief_config.json 的 schedule.time 采集新闻并推送
+    def _periodic_morning_brief():
+        import time as _time
+        while True:
+            try:
+                cfg = read_json(DATA / 'morning_brief_config.json', {})
+                schedule = cfg.get('schedule') or {}
+                enabled = schedule.get('enabled', True)
+                time_str = str(schedule.get('time', '08:00') or '08:00')
+                parts = time_str.split(':')
+                hour = int(parts[0]) if parts and parts[0].isdigit() else 8
+                minute = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                now = datetime.datetime.now()
+                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if target <= now:
+                    target += datetime.timedelta(days=1)
+                _time.sleep((target - now).total_seconds())
+                if not enabled:
+                    continue
+                log.info('📰 早朝定时触发：采集天下要闻')
+                subprocess.run(
+                    [python_bin(), str(SCRIPTS / 'fetch_morning_news.py'), '--force'],
+                    timeout=120,
+                )
+                push_notification()
+            except Exception as e:
+                log.warning(f'早朝定时异常: {e}')
+                _time.sleep(300)
+    threading.Thread(target=_periodic_morning_brief, daemon=True).start()
+    log.info('📰 早朝定时已启动（默认每日 08:00）')
 
     try:
         server.serve_forever()
