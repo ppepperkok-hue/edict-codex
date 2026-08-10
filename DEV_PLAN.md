@@ -67,6 +67,8 @@
 | M1 | 2026-08-10 | 通过（55 测试基线；e2e done 用例适配新状态机） | 已处置 |
 | M2 | 2026-08-10 | 通过（权限/备份/统计新增测试；修复 create 参数与队列闭环） | 已处置 |
 | M3 | 2026-08-10 | 通过（12 角色模板与 AGENTS.md 协议一致，无 OpenClaw 残留） | 已处置 |
+| M4 | 2026-08-10 | 通过（议政配置源独立、早朝定时、旧前端清理；启动验证 + 权限 403 实测） | 已处置 |
+| M5 | 2026-08-10 | 通过（CLI 全链路含封驳/御批/非法跳转；数据与代码回滚演练；81 测试全绿） | 已处置 |
 | M4 | 2026-08-10 | 未单独留档，由 M5 终审覆盖复核 v0.4.0→v0.5.0 全部变更 | M5 终审覆盖 |
 
 ## 测试基线
@@ -106,3 +108,9 @@ python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 
 - \gents.json\ 与 README 仍为上游 OpenClaw 形态，M5 收口时更新。
 - M4 已完成：议政模块改为项目 \data/llm_config.json\ + EDICT_LLM_* 环境变量；删除旧版 \dashboard/dashboard.html\（服务端仅提供 React dist）；server 内置早朝定时线程（默认每日 08:00，读 morning_brief_config.json 的 schedule）。
+
+## 回滚演练记录
+
+- 数据回滚（2026-08-10）：`backup_data.py --label pre-drill` 建快照 → 写坏 `tasks_source.json` → `restore_data.py --path <snapshot>` 恢复为 `[]` 并触发刷新；`--reset-config` 从模板重建 `agent_config.json` 通过。
+- 代码回滚（2026-08-10）：临时分支制造坏 commit → `git revert HEAD` → 坏文件删除、历史保留；分支已清理，main 不受影响。
+- 改进：`restore_data.py --time latest` 现在跳过 before-restore/before-reset-config 安全快照，新增测试覆盖。

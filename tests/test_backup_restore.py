@@ -108,3 +108,14 @@ def test_reset_config_rebuilds_from_template(tmp_path):
     assert json.loads((data / 'agent_config.json').read_text(encoding='utf-8')) == {
         'defaultModel': 'template-model'
     }
+
+
+def test_latest_prefers_user_snapshot_over_safety_backup(tmp_path):
+    data = _make_runtime_dir(tmp_path)
+    backups = tmp_path / 'backups'
+    user_snapshot = backup_data.create_backup(data_dir=data, backups_dir=backups, label='pre-drill')
+    safety_snapshot = backup_data.create_backup(data_dir=data, backups_dir=backups, label='before-restore')
+
+    assert restore_data.resolve_snapshot('latest', backups) == user_snapshot
+    stamp = safety_snapshot.name.replace('backup_', '')
+    assert restore_data.resolve_snapshot(stamp, backups) == safety_snapshot

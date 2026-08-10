@@ -48,7 +48,15 @@ def resolve_snapshot(selector: str, backups_dir=None):
     if not snapshots:
         return None
     if not selector or selector == 'latest':
-        return snapshots[-1]
+        # Prefer user-created snapshots over safety snapshots produced by
+        # restore itself (label=before-restore / before-reset-config).
+        safety_labels = ('before-restore', 'before-reset-config')
+        user_snapshots = [
+            p
+            for p in snapshots
+            if (backup_data._read_manifest(p) or {}).get('label') not in safety_labels
+        ]
+        return (user_snapshots or snapshots)[-1]
     candidate = backups_dir / selector
     if candidate.is_dir():
         return candidate
