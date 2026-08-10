@@ -13,16 +13,16 @@
 
 ```bash
 # 更新状态
-python3 scripts/kanban_update.py state <id> <state> "<说明>"
+python scripts/kanban_update.py state <id> <state> "<说明>"
 
 # 流转记录
-python3 scripts/kanban_update.py flow <id> "<from>" "<to>" "<remark>"
+python scripts/kanban_update.py flow <id> "<from>" "<to>" "<remark>"
 
 # 实时进展上报
-python3 scripts/kanban_update.py progress <id> "<当前在做什么>" "<计划1✅|计划2🔄|计划3>"
+python scripts/kanban_update.py progress <id> "<当前在做什么>" "<计划1✅|计划2🔄|计划3>"
 
 # 子任务管理
-python3 scripts/kanban_update.py todo <id> <todo_id> "<title>" <status> --detail "<产出详情>"
+python scripts/kanban_update.py todo <id> <todo_id> "<title>" <status> --detail "<产出详情>"
 ```
 
 ---
@@ -37,7 +37,7 @@ python3 scripts/kanban_update.py todo <id> <todo_id> "<title>" <status> --detail
 
 ```bash
 # 完成任务后，上报具体产出
-python3 scripts/kanban_update.py todo JJC-xxx 1 "[子任务名]" completed --detail "产出概要：\n- 要点1\n- 要点2\n验证结果：通过"
+python scripts/kanban_update.py todo JJC-xxx 1 "[子任务名]" completed --detail "产出概要：\n- 要点1\n- 要点2\n验证结果：通过"
 ```
 
 ---

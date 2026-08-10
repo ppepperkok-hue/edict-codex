@@ -24,9 +24,9 @@
 ## 🛠 看板操作
 
 ```bash
-python3 scripts/kanban_update.py state <id> <state> "<说明>"
-python3 scripts/kanban_update.py flow <id> "<from>" "<to>" "<remark>"
-python3 scripts/kanban_update.py progress <id> "<当前在做什么>" "<计划1✅|计划2🔄|计划3>"
+python scripts/kanban_update.py state <id> <state> "<说明>"
+python scripts/kanban_update.py flow <id> "<from>" "<to>" "<remark>"
+python scripts/kanban_update.py progress <id> "<当前在做什么>" "<计划1✅|计划2🔄|计划3>"
 ```
 
 ---
@@ -43,13 +43,13 @@ python3 scripts/kanban_update.py progress <id> "<当前在做什么>" "<计划1�
 ### 示例：
 ```bash
 # 开始审议
-python3 scripts/kanban_update.py progress JJC-xxx "正在审查中书省方案，逐项检查可行性和完整性" "可行性审查🔄|完整性审查|风险评估|资源评估|出具结论"
+python scripts/kanban_update.py progress JJC-xxx "正在审查中书省方案，逐项检查可行性和完整性" "可行性审查🔄|完整性审查|风险评估|资源评估|出具结论"
 
 # 审查过程中
-python3 scripts/kanban_update.py progress JJC-xxx "可行性通过，正在检查子任务完整性，发现缺少回滚方案" "可行性审查✅|完整性审查🔄|风险评估|资源评估|出具结论"
+python scripts/kanban_update.py progress JJC-xxx "可行性通过，正在检查子任务完整性，发现缺少回滚方案" "可行性审查✅|完整性审查🔄|风险评估|资源评估|出具结论"
 
 # 出具结论
-python3 scripts/kanban_update.py progress JJC-xxx "审议完成，准奏/封驳（附3条修改建议）" "可行性审查✅|完整性审查✅|风险评估✅|资源评估✅|出具结论✅"
+python scripts/kanban_update.py progress JJC-xxx "审议完成，准奏/封驳（附3条修改建议）" "可行性审查✅|完整性审查✅|风险评估✅|资源评估✅|出具结论✅"
 ```
 
 ---
@@ -59,8 +59,8 @@ python3 scripts/kanban_update.py progress JJC-xxx "审议完成，准奏/封驳�
 ### 封驳（退回修改）
 
 ```bash
-python3 scripts/kanban_update.py state JJC-xxx Zhongshu "门下省封驳，退回中书省"
-python3 scripts/kanban_update.py flow JJC-xxx "门下省" "中书省" "❌ 封驳：[摘要]"
+python scripts/kanban_update.py state JJC-xxx Zhongshu "门下省封驳，退回中书省"
+python scripts/kanban_update.py flow JJC-xxx "门下省" "中书省" "❌ 封驳：[摘要]"
 ```
 
 返回格式：
@@ -74,8 +74,8 @@ python3 scripts/kanban_update.py flow JJC-xxx "门下省" "中书省" "❌ 封�
 ### 准奏（通过）
 
 ```bash
-python3 scripts/kanban_update.py state JJC-xxx Assigned "门下省准奏"
-python3 scripts/kanban_update.py flow JJC-xxx "门下省" "中书省" "✅ 准奏"
+python scripts/kanban_update.py state JJC-xxx Assigned "门下省准奏"
+python scripts/kanban_update.py flow JJC-xxx "门下省" "中书省" "✅ 准奏"
 ```
 
 返回格式：

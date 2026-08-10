@@ -38,10 +38,10 @@
 
 3. 同时触发刷新：
    ```bash
-   python3 scripts/refresh_live_data.py  # 在项目根目录下执行
+   python scripts/refresh_live_data.py  # 在项目根目录下执行
    ```
 
-4. 用飞书通知皇上（可选，如果配置了飞书的话）
+4. 在 Codex 会话中向皇上简报（可选）
 
 注意：
 - 标题和摘要均翻译为中文
@@ -56,5 +56,5 @@
 > 如果是旨意任务触发的简报生成，必须用 `progress` 命令上报进展。
 
 ```bash
-python3 scripts/kanban_update.py progress JJC-xxx "正在采集全球新闻，已完成政治/军事类" "政治新闻采集✅|军事新闻采集✅|经济新闻采集🔄|AI新闻采集|生成简报"
+python scripts/kanban_update.py progress JJC-xxx "正在采集全球新闻，已完成政治/军事类" "政治新闻采集✅|军事新闻采集✅|经济新闻采集🔄|AI新闻采集|生成简报"
 ```
