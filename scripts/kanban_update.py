@@ -3,11 +3,7 @@
 看板任务更新工具 - 供各省部 Agent 调用
 
 本工具操作 data/tasks_source.json（JSON 看板模式）。
-如果您已部署 edict/backend（Postgres + Redis 事件总线模式），
-请使用 edict/backend API 端点代替本脚本，或运行迁移脚本：
-  python3 edict/migration/migrate_json_to_pg.py
-
-两种模式互相独立，数据不会自动同步。
+Edict-Codex 只使用 JSON 数据模式，不部署 edict/backend（Postgres/Redis）。
 
 用法:
   # 新建任务（收旨时）
@@ -32,6 +28,13 @@
 import datetime
 import json, pathlib, sys, subprocess, logging, os, re
 from utils import python_bin
+
+# Windows 控制台/管道默认 GBK 编码，无法输出 emoji；统一改为 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
 
 _BASE = pathlib.Path(os.environ['EDICT_HOME']) if 'EDICT_HOME' in os.environ else pathlib.Path(__file__).resolve().parent.parent
 TASKS_FILE = _BASE / 'data' / 'tasks_source.json'
@@ -299,11 +302,13 @@ def cmd_create(task_id, title, state, org, official, remark=None):
         return
     actual_org = STATE_ORG_MAP.get(state, org)
     clean_remark = _sanitize_remark(remark) if remark else f"下旨：{title}"
+    rejected = [False]
     def modifier(tasks):
         existing = next((t for t in tasks if t.get('id') == task_id), None)
         if existing:
             if existing.get('state') in ('Done', 'Cancelled'):
                 log.warning(f'⚠️ 任务 {task_id} 已完结 (state={existing["state"]})，不可覆盖')
+                rejected[0] = True
                 return tasks
             if existing.get('state') not in (None, '', 'Inbox', 'Pending'):
                 log.warning(f'任务 {task_id} 已存在 (state={existing["state"]})，将被覆盖')
@@ -319,6 +324,9 @@ def cmd_create(task_id, title, state, org, official, remark=None):
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
     _trigger_refresh()
+    if rejected[0]:
+        log.warning(f'❌ 创建被拒绝 {task_id}：任务已完结，不可覆盖')
+        return
     log.info(f'✅ 创建 {task_id} | {title[:30]} | state={state}')
     _append_audit(task_id, _infer_agent_id_from_runtime(), 'create', None, state, title)
 
@@ -337,7 +345,7 @@ else:
         'Menxia':         {'Assigned', 'Zhongshu', 'Cancelled'},
         'Assigned':       {'Doing', 'Next', 'Blocked', 'Cancelled'},
         'Next':           {'Doing', 'Blocked', 'Cancelled'},
-        'Doing':          {'Review', 'Done', 'Blocked', 'Cancelled'},
+        'Doing':          {'Review', 'Blocked', 'Cancelled'},
         'Review':         {'Done', 'Menxia', 'Doing', 'Cancelled', 'PendingConfirm'},
         'PendingConfirm': {'Done', 'Review', 'Cancelled'},
         'Blocked':        {'Taizi', 'Zhongshu', 'Menxia', 'Assigned', 'Next', 'Doing', 'Review', 'Cancelled'},
@@ -946,7 +954,7 @@ _CMD_MIN_ARGS = {
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    if not args:
+    if not args or args[0] in ('-h', '--help'):
         print(__doc__)
         sys.exit(0)
     cmd = args[0]

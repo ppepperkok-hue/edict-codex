@@ -52,7 +52,7 @@ def test_write_atomic_no_partial(tmp_path):
     p = tmp_path / 'atomic.json'
     big = {'items': list(range(1000))}
     atomic_json_write(p, big)
-    result = json.loads(p.read_text())
+    result = json.loads(p.read_text(encoding='utf-8'))
     assert len(result['items']) == 1000
 
 

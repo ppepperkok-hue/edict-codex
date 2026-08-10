@@ -21,7 +21,7 @@ if data_dir.exists() and not data_dir.is_dir():
     data_dir.unlink()
 data_dir.mkdir(parents=True, exist_ok=True)
 if not TASKS_FILE.exists():
-    TASKS_FILE.write_text('[]')
+    TASKS_FILE.write_text('[]', encoding='utf-8')
 
 
 def _get_task(tid):
@@ -31,12 +31,12 @@ def _get_task(tid):
 @pytest.fixture(autouse=True)
 def _backup_and_restore():
     """每个测试前备份数据，测试后恢复并清理测试任务。"""
-    backup = TASKS_FILE.read_text()
+    backup = TASKS_FILE.read_text(encoding='utf-8')
     yield
-    TASKS_FILE.write_text(backup)
-    tasks = json.loads(TASKS_FILE.read_text())
+    TASKS_FILE.write_text(backup, encoding='utf-8')
+    tasks = json.loads(TASKS_FILE.read_text(encoding='utf-8'))
     tasks = [t for t in tasks if not t.get('id', '').startswith('JJC-TEST-')]
-    TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2))
+    TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 # ── TEST 1: 脏标题(含文件路径+Conversation)应被清洗后创建

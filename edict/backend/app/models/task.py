@@ -38,7 +38,7 @@ STATE_TRANSITIONS = {
     TaskState.Menxia: {TaskState.Assigned, TaskState.Zhongshu, TaskState.Cancelled},
     TaskState.Assigned: {TaskState.Doing, TaskState.Next, TaskState.Cancelled, TaskState.Blocked},
     TaskState.Next: {TaskState.Doing, TaskState.Cancelled, TaskState.Blocked},
-    TaskState.Doing: {TaskState.Review, TaskState.Done, TaskState.Blocked, TaskState.Cancelled},
+    TaskState.Doing: {TaskState.Review, TaskState.Blocked, TaskState.Cancelled},
     TaskState.Review: {TaskState.Done, TaskState.Menxia, TaskState.Doing, TaskState.Cancelled, TaskState.PendingConfirm},
     TaskState.PendingConfirm: {TaskState.Done, TaskState.Review, TaskState.Cancelled},
     TaskState.Blocked: {
