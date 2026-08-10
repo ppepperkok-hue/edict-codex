@@ -26,6 +26,7 @@ scripts_dir = str(pathlib.Path(__file__).parent.parent / 'scripts')
 sys.path.insert(0, scripts_dir)
 from file_lock import atomic_json_read, atomic_json_write, atomic_json_update
 from utils import validate_url, read_json, now_iso, python_bin
+from backup_data import create_backup as create_data_backup
 from court_discuss import (
     create_session as cd_create, advance_discussion as cd_advance,
     get_session as cd_get, conclude_session as cd_conclude,
@@ -41,7 +42,6 @@ if str(CHANNELS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(CHANNELS_DIR.parent))
 from channels import get_channel, get_channel_info, CHANNELS as NOTIFICATION_CHANNELS
 
-OCLAW_HOME = pathlib.Path.home() / '.openclaw'
 MAX_REQUEST_BODY = 1 * 1024 * 1024  # 1 MB
 ALLOWED_ORIGIN = None  # Set via --cors; None means restrict to localhost
 _DASHBOARD_PORT = 7891  # Updated at startup from --port arg
@@ -55,6 +55,7 @@ BASE = pathlib.Path(__file__).parent
 DIST = BASE / 'dist'          # React 构建产物 (npm run build)
 DATA = BASE.parent / "data"
 SCRIPTS = BASE.parent / 'scripts'
+SKILLS_ROOT = BASE.parent / 'skills'
 _ACTIVE_TASK_DATA_DIR = None
 
 # 静态资源 MIME 类型
@@ -90,12 +91,8 @@ def cors_headers(h):
 
 
 def _iter_task_data_dirs():
-    """返回可用的任务数据目录候选（优先 workspace，其次本地 data）。"""
-    dirs = [DATA]
-    for p in sorted(OCLAW_HOME.glob('workspace-*/data')):
-        if p.is_dir():
-            dirs.append(p)
-    return dirs
+    """返回可用的任务数据目录候选（本地 data）。"""
+    return [DATA]
 
 
 def _task_source_score(task_file: pathlib.Path):
@@ -299,8 +296,8 @@ def read_skill_content(agent_id, skill_name):
     if not sk:
         return {'ok': False, 'error': f'技能 {skill_name} 不存在'}
     skill_path = pathlib.Path(sk.get('path', '')).resolve()
-    # 路径遍历保护：确保路径在 OCLAW_HOME 或项目目录下
-    allowed_roots = (OCLAW_HOME.resolve(), BASE.parent.resolve())
+    # 路径遍历保护：确保路径在项目目录下
+    allowed_roots = (BASE.parent.resolve(),)
     if not any(str(skill_path).startswith(str(root)) for root in allowed_roots):
         return {'ok': False, 'error': '路径不在允许的目录范围内'}
     if not skill_path.exists():
@@ -318,7 +315,7 @@ def add_skill_to_agent(agent_id, skill_name, description, trigger=''):
         return {'ok': False, 'error': f'skill_name 含非法字符: {skill_name}'}
     if not _SAFE_NAME_RE.match(agent_id):
         return {'ok': False, 'error': f'agentId 含非法字符: {agent_id}'}
-    workspace = OCLAW_HOME / f'workspace-{agent_id}' / 'skills' / skill_name
+    workspace = SKILLS_ROOT / agent_id / skill_name
     workspace.mkdir(parents=True, exist_ok=True)
     skill_md = workspace / 'SKILL.md'
     desc_line = description or skill_name
@@ -340,11 +337,6 @@ def add_skill_to_agent(agent_id, skill_name, description, trigger=''):
                 f'## 注意事项\n\n'
                 f'- (在此补充约束、限制或特殊规则)\n')
     skill_md.write_text(template)
-    # Re-sync agent config
-    try:
-        subprocess.run([python_bin(), str(SCRIPTS / 'sync_agent_config.py')], timeout=10)
-    except Exception:
-        pass
     return {'ok': True, 'message': f'技能 {skill_name} 已添加到 {agent_id}', 'path': str(skill_md)}
 
 
@@ -394,7 +386,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
             if not local_path.exists():
                 return {'ok': False, 'error': f'本地文件不存在: {local_path}'}
             # 路径遍历防护：与本地路径分支一致，确保在允许范围内
-            allowed_roots = (OCLAW_HOME.resolve(), BASE.parent.resolve())
+            allowed_roots = (BASE.parent.resolve(),)
             if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
                 return {'ok': False, 'error': '路径不在允许的目录范围内'}
             content = local_path.read_text()
@@ -405,7 +397,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
             if not local_path.exists():
                 return {'ok': False, 'error': f'本地文件不存在: {local_path}'}
             # 路径遍历防护
-            allowed_roots = (OCLAW_HOME.resolve(), BASE.parent.resolve())
+            allowed_roots = (BASE.parent.resolve(),)
             if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
                 return {'ok': False, 'error': '路径不在允许的目录范围内'}
             content = local_path.read_text()
@@ -434,7 +426,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
         return {'ok': False, 'error': f'YAML 格式无效: {str(e)[:100]}'}
     
     # 创建本地目录
-    workspace = OCLAW_HOME / f'workspace-{agent_id}' / 'skills' / skill_name
+    workspace = SKILLS_ROOT / agent_id / skill_name
     workspace.mkdir(parents=True, exist_ok=True)
     skill_md = workspace / 'SKILL.md'
     
@@ -454,12 +446,6 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
     source_json = workspace / '.source.json'
     source_json.write_text(json.dumps(source_info, ensure_ascii=False, indent=2))
     
-    # Re-sync agent config
-    try:
-        subprocess.run([python_bin(), str(SCRIPTS / 'sync_agent_config.py')], timeout=10)
-    except Exception:
-        pass
-    
     return {
         'ok': True,
         'message': f'技能 {skill_name} 已从远程源添加到 {agent_id}',
@@ -476,12 +462,14 @@ def get_remote_skills_list():
     """列表所有已添加的远程 skills 及其源信息"""
     remote_skills = []
     
-    # 遍历所有 workspace
-    for ws_dir in OCLAW_HOME.glob('workspace-*'):
-        agent_id = ws_dir.name.replace('workspace-', '')
-        skills_dir = ws_dir / 'skills'
-        if not skills_dir.exists():
+    # 遍历项目本地 skills 目录
+    if not SKILLS_ROOT.exists():
+        return {'ok': True, 'remoteSkills': [], 'count': 0, 'listedAt': now_iso()}
+    for agent_dir in SKILLS_ROOT.iterdir():
+        if not agent_dir.is_dir():
             continue
+        agent_id = agent_dir.name
+        skills_dir = agent_dir
         
         for skill_dir in skills_dir.iterdir():
             if not skill_dir.is_dir():
@@ -526,7 +514,7 @@ def update_remote_skill(agent_id, skill_name):
     if not _SAFE_NAME_RE.match(skill_name):
         return {'ok': False, 'error': f'skillName 含非法字符: {skill_name}'}
     
-    workspace = OCLAW_HOME / f'workspace-{agent_id}' / 'skills' / skill_name
+    workspace = SKILLS_ROOT / agent_id / skill_name
     source_json = workspace / '.source.json'
     skill_md = workspace / 'SKILL.md'
     
@@ -558,7 +546,7 @@ def remove_remote_skill(agent_id, skill_name):
     if not _SAFE_NAME_RE.match(skill_name):
         return {'ok': False, 'error': f'skillName 含非法字符: {skill_name}'}
     
-    workspace = OCLAW_HOME / f'workspace-{agent_id}' / 'skills' / skill_name
+    workspace = SKILLS_ROOT / agent_id / skill_name
     if not workspace.exists():
         return {'ok': False, 'error': f'技能不存在: {skill_name}'}
     
@@ -571,12 +559,6 @@ def remove_remote_skill(agent_id, skill_name):
         # 删除整个 skill 目录
         import shutil
         shutil.rmtree(workspace)
-        
-        # Re-sync agent config
-        try:
-            subprocess.run([python_bin(), str(SCRIPTS / 'sync_agent_config.py')], timeout=10)
-        except Exception:
-            pass
         
         return {'ok': True, 'message': f'技能 {skill_name} 已从 {agent_id} 移除'}
     except Exception as e:
@@ -809,79 +791,56 @@ _AGENT_DEPTS = [
 ]
 
 
-def _check_gateway_alive():
-    """检测 Gateway 是否在运行。
-
-    Windows 上不要依赖 pgrep；优先通过本地端口探测判断。
-    """
-    if _check_gateway_probe():
-        return True
-    try:
-        if os.name == 'nt':
-            with socket.create_connection(('127.0.0.1', 18789), timeout=2):
-                return True
-            return False
-        result = subprocess.run(['pgrep', '-f', 'openclaw-gateway'],
-                                capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except Exception:
-        return False
+def _read_dispatch_queue() -> list:
+    """Read the Codex dispatch queue (created on demand by the orchestrator)."""
+    return read_json(DATA / 'dispatch_queue.json', [])
 
 
-def _check_gateway_probe():
-    """通过 HTTP probe 检测 Gateway 是否响应。"""
-    for url in ('http://127.0.0.1:18789/', 'http://127.0.0.1:18789/healthz'):
-        try:
-            from urllib.request import urlopen
-            resp = urlopen(url, timeout=3)
-            if 200 <= resp.status < 500:
-                return True
-        except Exception:
-            continue
-    return False
+def _enqueue_dispatch(agent_id: str, task_id: str, message: str, trigger: str = 'manual'):
+    """Append a dispatch request to data/dispatch_queue.json for the orchestrator."""
+    entry = {
+        'at': now_iso(),
+        'agentId': agent_id,
+        'taskId': task_id,
+        'trigger': trigger,
+        'message': message[:500],
+        'status': 'queued',
+    }
+
+    def modifier(queue):
+        if not isinstance(queue, list):
+            queue = []
+        queue.append(entry)
+        return queue[-200:]
+
+    atomic_json_update(DATA / 'dispatch_queue.json', modifier, [])
 
 
-def _get_agent_session_status(agent_id):
-    """读取 Agent 的 sessions.json 获取活跃状态。
-    返回: (last_active_ts_ms, session_count, is_busy)
-    """
-    sessions_file = OCLAW_HOME / 'agents' / agent_id / 'sessions' / 'sessions.json'
-    if not sessions_file.exists():
-        return 0, 0, False
-    try:
-        data = json.loads(sessions_file.read_text())
-        if not isinstance(data, dict):
-            return 0, 0, False
-        session_count = len(data)
-        last_ts = 0
-        for v in data.values():
-            ts = v.get('updatedAt', 0)
-            if isinstance(ts, (int, float)) and ts > last_ts:
-                last_ts = ts
-        now_ms = int(datetime.datetime.now().timestamp() * 1000)
-        age_ms = now_ms - last_ts if last_ts else 9999999999
-        is_busy = age_ms <= 2 * 60 * 1000  # 2分钟内视为正在工作
-        return last_ts, session_count, is_busy
-    except Exception:
-        return 0, 0, False
+def _agent_last_activity_ts(agent_id) -> int:
+    """Latest progress/audit timestamp for an agent (epoch ms, 0 if none)."""
+    latest = 0
+    for task in load_tasks():
+        for entry in task.get('progress_log') or []:
+            if entry.get('agent') != agent_id:
+                continue
+            ts = _parse_iso(entry.get('at') or entry.get('ts'))
+            if ts:
+                latest = max(latest, int(ts.timestamp() * 1000))
+    return latest
 
 
-def _check_agent_process(agent_id):
-    """检测是否有该 Agent 的 openclaw-agent 进程正在运行。"""
-    try:
-        result = subprocess.run(
-            ['pgrep', '-f', f'openclaw.*--agent.*{agent_id}'],
-            capture_output=True, text=True, timeout=5
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+def _agent_progress_count(agent_id) -> int:
+    """Count progress_log entries per agent (proxy for session activity)."""
+    return sum(
+        1 for task in load_tasks()
+        for entry in (task.get('progress_log') or [])
+        if entry.get('agent') == agent_id
+    )
 
 
 def _check_agent_workspace(agent_id):
-    """检查 Agent 工作空间是否存在。"""
-    ws = OCLAW_HOME / f'workspace-{agent_id}'
-    return ws.is_dir()
+    """检查 Agent 技能目录是否存在（视为已配置）。"""
+    return (SKILLS_ROOT / agent_id).is_dir()
 
 
 def get_agents_status():
@@ -891,10 +850,8 @@ def get_agents_status():
     - lastActive: 最后活跃时间
     - sessions: 会话数
     - hasWorkspace: 工作空间是否存在
-    - processAlive: 是否有进程在运行
     """
-    gateway_alive = _check_gateway_alive()
-    gateway_probe = _check_gateway_probe() if gateway_alive else False
+    queued_agents = {entry.get('agentId') for entry in _read_dispatch_queue() if entry.get('status') == 'queued'}
 
     agents = []
     seen_ids = set()
@@ -905,31 +862,26 @@ def get_agents_status():
         seen_ids.add(aid)
 
         has_workspace = _check_agent_workspace(aid)
-        last_ts, sess_count, is_busy = _get_agent_session_status(aid)
-        process_alive = _check_agent_process(aid)
+        last_ts = _agent_last_activity_ts(aid)
+        progress_count = _agent_progress_count(aid)
+        has_pending_dispatch = aid in queued_agents
 
         # 状态判定
         if not has_workspace:
             status = 'unconfigured'
             status_label = '❌ 未配置'
-        elif not gateway_alive:
-            status = 'offline'
-            status_label = '🔴 Gateway 离线'
-        elif process_alive or is_busy:
+        elif has_pending_dispatch:
             status = 'running'
-            status_label = '🟢 运行中'
+            status_label = '🟢 待接旨'
         elif last_ts > 0:
             now_ms = int(datetime.datetime.now().timestamp() * 1000)
             age_ms = now_ms - last_ts
             if age_ms <= 10 * 60 * 1000:  # 10分钟内
-                status = 'idle'
-                status_label = '🟡 待命'
-            elif age_ms <= 3600 * 1000:  # 1小时内
-                status = 'idle'
-                status_label = '⚪ 空闲'
+                status = 'running'
+                status_label = '🟢 运行中'
             else:
                 status = 'idle'
-                status_label = '⚪ 休眠'
+                status_label = '⚪ 空闲'
         else:
             status = 'idle'
             status_label = '⚪ 无记录'
@@ -953,59 +905,26 @@ def get_agents_status():
             'statusLabel': status_label,
             'lastActive': last_active_str,
             'lastActiveTs': last_ts,
-            'sessions': sess_count,
+            'sessions': progress_count,
             'hasWorkspace': has_workspace,
-            'processAlive': process_alive,
         })
 
     return {
         'ok': True,
-        'gateway': {
-            'alive': gateway_alive,
-            'probe': gateway_probe,
-            'status': '🟢 运行中' if gateway_probe else ('🟡 进程在但无响应' if gateway_alive else '🔴 未启动'),
-        },
+        'dispatchQueue': len(queued_agents),
         'agents': agents,
         'checkedAt': now_iso(),
     }
 
 
 def wake_agent(agent_id, message=''):
-    """唤醒指定 Agent，发送一条心跳/唤醒消息。"""
+    """唤醒指定 Agent：将心跳/唤醒消息写入 dispatch queue。"""
     if not _SAFE_NAME_RE.match(agent_id):
         return {'ok': False, 'error': f'agent_id 非法: {agent_id}'}
-    if not _check_agent_workspace(agent_id):
-        return {'ok': False, 'error': f'{agent_id} 工作空间不存在，请先配置'}
-    if not _check_gateway_alive():
-        return {'ok': False, 'error': 'Gateway 未启动，请先运行 openclaw gateway start'}
-
-    # agent_id 直接作为 runtime_id（openclaw agents list 中的注册名）
-    runtime_id = agent_id
     msg = message or f'🔔 系统心跳检测 — 请回复 OK 确认在线。当前时间: {now_iso()}'
-
-    def do_wake():
-        try:
-            cmd = ['openclaw', 'agent', '--agent', runtime_id, '-m', msg, '--timeout', '120']
-            log.info(f'🔔 唤醒 {agent_id}...')
-            # 带重试（最多2次）
-            for attempt in range(1, 3):
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=130)
-                if result.returncode == 0:
-                    log.info(f'✅ {agent_id} 已唤醒')
-                    return
-                err_msg = result.stderr[:200] if result.stderr else result.stdout[:200]
-                log.warning(f'⚠️ {agent_id} 唤醒失败(第{attempt}次): {err_msg}')
-                if attempt < 2:
-                    import time
-                    time.sleep(5)
-            log.error(f'❌ {agent_id} 唤醒最终失败')
-        except subprocess.TimeoutExpired:
-            log.error(f'❌ {agent_id} 唤醒超时(130s)')
-        except Exception as e:
-            log.warning(f'⚠️ {agent_id} 唤醒异常: {e}')
-    threading.Thread(target=do_wake, daemon=True).start()
-
-    return {'ok': True, 'message': f'{agent_id} 唤醒指令已发出，约10-30秒后生效'}
+    _enqueue_dispatch(agent_id, '', msg, trigger='wake')
+    log.info(f'🔔 唤醒 {agent_id} 已入队')
+    return {'ok': True, 'message': f'{agent_id} 唤醒指令已入队，Codex 编排器下次轮询将处理'}
 
 
 # ══ Agent 实时活动读取 ══
@@ -1028,6 +947,104 @@ _ORG_AGENT_MAP = {
 }
 
 _TERMINAL_STATES = {'Done', 'Cancelled'}
+
+_AGENT_ONLY_WRITE_PATHS = frozenset({'/api/task-todos', '/api/repair-flow-order'})
+_MODEL_EDITOR_AGENTS = frozenset({'taizi', 'main', 'libu_hr'})
+_SKILL_EDITOR_AGENTS = frozenset({'taizi', 'main', 'libu_hr'})
+_MORNING_AGENTS = frozenset({'taizi', 'main', 'zaochao'})
+_DISPATCH_ADMIN_AGENTS = frozenset({'taizi', 'main', 'shangshu'})
+_TASK_WRITE_PATHS = frozenset({
+    '/api/task-action', '/api/advance-state', '/api/review-action',
+})
+_SCHEDULER_WRITE_PATHS = frozenset({
+    '/api/scheduler-scan', '/api/scheduler-retry',
+    '/api/scheduler-escalate', '/api/scheduler-rollback',
+})
+
+
+def _agent_registry() -> dict:
+    """Agent id -> record, merging runtime config with the repo agents.json."""
+    registry = {}
+    cfg = read_json(DATA / 'agent_config.json', {})
+    for entry in cfg.get('agents') or []:
+        if isinstance(entry, dict) and entry.get('id'):
+            registry[entry['id']] = entry
+    fallback = read_json(BASE.parent / 'agents.json', [])
+    if isinstance(fallback, list):
+        for entry in fallback:
+            if isinstance(entry, dict) and entry.get('id') and entry['id'] not in registry:
+                registry[entry['id']] = {
+                    'id': entry['id'],
+                    'allowAgents': (entry.get('subagents') or {}).get('allowAgents', []),
+                }
+    return registry
+
+
+def _task_owner_agent(task) -> str:
+    """Return the agent responsible for the task's current state."""
+    agent = _STATE_AGENT_MAP.get(task.get('state', ''))
+    if agent:
+        return agent
+    return _ORG_AGENT_MAP.get(task.get('org', ''), '')
+
+
+def _guard_agent_write(agent_id: str, path: str, body: dict):
+    """Enforce X-Agent-ID identity and permissions on write APIs.
+
+    Requests without the header are treated as dashboard/CLI (privileged).
+    Requests with the header must name a known agent allowed for the action.
+    Returns an error dict (HTTP 403) or None when allowed.
+    """
+    if not agent_id:
+        if path in _AGENT_ONLY_WRITE_PATHS:
+            return {'ok': False, 'error': 'X-Agent-ID header required for agent-channel API'}
+        return None
+    if not _SAFE_NAME_RE.match(agent_id):
+        return {'ok': False, 'error': 'invalid X-Agent-ID'}
+
+    registry = _agent_registry()
+    agent = registry.get(agent_id)
+    if not agent:
+        return {'ok': False, 'error': f'unknown agent: {agent_id}'}
+
+    authority = 'taizi' if agent_id in ('taizi', 'main') else agent_id
+    allow = agent.get('allowAgents') or []
+
+    if path == '/api/agent-wake':
+        target = str(body.get('agentId', '')).strip()
+        if target and authority != 'taizi' and target not in allow:
+            return {'ok': False, 'error': f'{agent_id} 无权唤醒 {target}'}
+        return None
+    if authority == 'taizi':
+        return None
+
+    if path in ('/api/create-task', '/api/task-action'):
+        return {'ok': False, 'error': f'{agent_id} 无权执行 {path}（仅太子/看板）'}
+    if path == '/api/set-model' and authority not in _MODEL_EDITOR_AGENTS:
+        return {'ok': False, 'error': f'{agent_id} 无权修改模型配置'}
+    if path in (
+        '/api/add-skill', '/api/add-remote-skill',
+        '/api/update-remote-skill', '/api/remove-remote-skill',
+    ) and authority not in _SKILL_EDITOR_AGENTS:
+        return {'ok': False, 'error': f'{agent_id} 无权管理技能'}
+    if path in ('/api/morning-config', '/api/morning-brief/refresh') and authority not in _MORNING_AGENTS:
+        return {'ok': False, 'error': f'{agent_id} 无权管理早朝配置'}
+    if path in _SCHEDULER_WRITE_PATHS or path in (
+        '/api/archive-task', '/api/set-dispatch-channel', '/api/repair-flow-order',
+    ):
+        if authority not in _DISPATCH_ADMIN_AGENTS:
+            return {'ok': False, 'error': f'{agent_id} 无权执行调度管理'}
+        return None
+    if path in _TASK_WRITE_PATHS or path == '/api/task-todos':
+        task_id = str(body.get('taskId', '')).strip()
+        task = next((t for t in load_tasks() if t.get('id') == task_id), None)
+        if task and _task_owner_agent(task) != authority:
+            return {
+                'ok': False,
+                'error': f'{agent_id} 无权操作任务 {task_id}（当前归属 {task.get("org", "?")}）',
+            }
+        return None
+    return None
 
 
 def _parse_iso(ts):
@@ -1097,18 +1114,6 @@ def _scheduler_mark_progress(task, note=''):
     sched['lastEscalatedAt'] = None
     if note:
         _scheduler_add_flow(task, f'进展确认：{note}')
-
-
-def _resolve_openclaw_bin():
-    """Return the OpenClaw CLI path used by dashboard dispatch.
-
-    On Windows, npm-installed CLIs are commonly exposed as .cmd shims.  Using
-    shutil.which lets Python resolve that shim before subprocess runs.
-    """
-    configured = os.environ.get('OPENCLAW_BIN', '').strip()
-    if configured:
-        return configured
-    return shutil.which('openclaw')
 
 
 def _update_task_scheduler(task_id, updater):
@@ -1456,144 +1461,26 @@ def handle_repair_flow_order():
     }
 
 
-def _collect_message_text(msg):
-    """收集消息中的可检索文本，用于 task_id/关键词过滤。"""
-    parts = []
-    for c in msg.get('content', []) or []:
-        ctype = c.get('type')
-        if ctype == 'text' and c.get('text'):
-            parts.append(str(c.get('text', '')))
-        elif ctype == 'thinking' and c.get('thinking'):
-            parts.append(str(c.get('thinking', '')))
-        elif ctype == 'tool_use':
-            parts.append(json.dumps(c.get('input', {}), ensure_ascii=False))
-    details = msg.get('details') or {}
-    for key in ('output', 'stdout', 'stderr', 'message'):
-        val = details.get(key)
-        if isinstance(val, str) and val:
-            parts.append(val)
-    return ''.join(parts)
-
-
-def _parse_activity_entry(item):
-    """将 session jsonl 的 message 统一解析成看板活动条目。"""
-    msg = item.get('message') or {}
-    role = str(msg.get('role', '')).strip().lower()
-    ts = item.get('timestamp', '')
-
-    if role == 'assistant':
-        text = ''
-        thinking = ''
-        tool_calls = []
-        for c in msg.get('content', []) or []:
-            if c.get('type') == 'text' and c.get('text') and not text:
-                text = str(c.get('text', '')).strip()
-            elif c.get('type') == 'thinking' and c.get('thinking') and not thinking:
-                thinking = str(c.get('thinking', '')).strip()[:200]
-            elif c.get('type') == 'tool_use':
-                tool_calls.append({
-                    'name': c.get('name', ''),
-                    'input_preview': json.dumps(c.get('input', {}), ensure_ascii=False)[:100]
-                })
-        if not (text or thinking or tool_calls):
-            return None
-        entry = {'at': ts, 'kind': 'assistant'}
-        if text:
-            entry['text'] = text[:300]
-        if thinking:
-            entry['thinking'] = thinking
-        if tool_calls:
-            entry['tools'] = tool_calls
-        return entry
-
-    if role in ('toolresult', 'tool_result'):
-        details = msg.get('details') or {}
-        code = details.get('exitCode')
-        if code is None:
-            code = details.get('code', details.get('status'))
-        output = ''
-        for c in msg.get('content', []) or []:
-            if c.get('type') == 'text' and c.get('text'):
-                output = str(c.get('text', '')).strip()[:200]
-                break
-        if not output:
-            for key in ('output', 'stdout', 'stderr', 'message'):
-                val = details.get(key)
-                if isinstance(val, str) and val.strip():
-                    output = val.strip()[:200]
-                    break
-
-        entry = {
-            'at': ts,
-            'kind': 'tool_result',
-            'tool': msg.get('toolName', msg.get('name', '')),
-            'exitCode': code,
-            'output': output,
-        }
-        duration_ms = details.get('durationMs')
-        if isinstance(duration_ms, (int, float)):
-            entry['durationMs'] = int(duration_ms)
-        return entry
-
-    if role == 'user':
-        text = ''
-        for c in msg.get('content', []) or []:
-            if c.get('type') == 'text' and c.get('text'):
-                text = str(c.get('text', '')).strip()
-                break
-        if not text:
-            return None
-        return {'at': ts, 'kind': 'user', 'text': text[:200]}
-
-    return None
-
-
 def get_agent_activity(agent_id, limit=30, task_id=None):
-    """从 Agent 的 session jsonl 读取最近活动。
-    如果 task_id 不为空，只返回提及该 task_id 的相关条目。
+    """从 progress_log / audit_log 读取 Agent 的最近活动（替代 OpenClaw session）。
+    如果 task_id 不为空，只返回该任务相关的条目。
     """
-    sessions_dir = OCLAW_HOME / 'agents' / agent_id / 'sessions'
-    if not sessions_dir.exists():
-        return []
-
-    # 扫描所有 jsonl（按修改时间倒序），优先最新
-    jsonl_files = sorted(sessions_dir.glob('*.jsonl'), key=lambda f: f.stat().st_mtime, reverse=True)
-    if not jsonl_files:
-        return []
-
     entries = []
-    # 如果需要按 task_id 过滤，可能需要扫描多个文件
-    files_to_scan = jsonl_files[:3] if task_id else jsonl_files[:1]
-
-    for session_file in files_to_scan:
-        try:
-            lines = session_file.read_text(errors='ignore').splitlines()
-        except Exception:
+    for task in load_tasks():
+        if task_id and task.get('id') != task_id:
             continue
-
-        # 正向扫描以保持时间顺序；如果有 task_id，收集提及 task_id 的条目
-        for ln in lines:
-            try:
-                item = json.loads(ln)
-            except Exception:
+        for entry in task.get('progress_log') or []:
+            if entry.get('agent') != agent_id:
                 continue
-            msg = item.get('message') or {}
-            all_text = _collect_message_text(msg)
-
-            # task_id 过滤：只保留提及 task_id 的条目
-            if task_id and task_id not in all_text:
-                continue
-            entry = _parse_activity_entry(item)
-            if entry:
-                entries.append(entry)
-
-            if len(entries) >= limit:
-                break
-        if len(entries) >= limit:
-            break
-
-    # 只保留最后 limit 条
-    return entries[-limit:]
+            entries.append({
+                'at': entry.get('at') or entry.get('ts', ''),
+                'kind': 'progress',
+                'agent': agent_id,
+                'text': str(entry.get('message') or entry.get('remark') or '')[:300],
+                'taskId': task.get('id', ''),
+            })
+    entries.sort(key=lambda item: item.get('at', ''), reverse=True)
+    return entries[:limit]
 
 
 def _extract_keywords(title):
@@ -1617,138 +1504,54 @@ def _extract_keywords(title):
     return unique[:8]  # 最多 8 个关键词
 
 
+def apply_model_change(agent_id: str, model: str) -> dict:
+    """Apply a model change directly to agent_config.json (no OpenClaw runtime)."""
+    cfg_path = DATA / 'agent_config.json'
+
+    def modifier(cfg):
+        if not isinstance(cfg, dict):
+            cfg = {}
+        agents = cfg.get('agents') or []
+        for entry in agents:
+            if entry.get('id') == agent_id:
+                entry['model'] = model
+                entry['isDefaultModel'] = (model == cfg.get('defaultModel'))
+        cfg['agents'] = agents
+        return cfg
+
+    atomic_json_update(cfg_path, modifier, {})
+
+    change = {
+        'agentId': agent_id,
+        'model': model,
+        'appliedAt': now_iso(),
+        'rolledBack': False,
+    }
+
+    def append_log(current):
+        if not isinstance(current, list):
+            current = []
+        current.append(change)
+        return current[-200:]
+
+    atomic_json_update(DATA / 'model_change_log.json', append_log, [])
+    atomic_json_write(DATA / 'last_model_change_result.json', {
+        'ok': True,
+        'agentId': agent_id,
+        'model': model,
+        'ts': now_iso(),
+    })
+    return change
+
+
 def get_agent_activity_by_keywords(agent_id, keywords, limit=20):
-    """从 agent session 中按关键词匹配获取活动条目。
-    找到包含关键词的 session 文件，只读该文件的活动。
-    """
-    sessions_dir = OCLAW_HOME / 'agents' / agent_id / 'sessions'
-    if not sessions_dir.exists():
-        return []
-
-    jsonl_files = sorted(sessions_dir.glob('*.jsonl'), key=lambda f: f.stat().st_mtime, reverse=True)
-    if not jsonl_files:
-        return []
-
-    # 找到包含关键词的 session 文件
-    target_file = None
-    for sf in jsonl_files[:5]:
-        try:
-            content = sf.read_text(errors='ignore')
-        except Exception:
-            continue
-        hits = sum(1 for kw in keywords if kw.lower() in content.lower())
-        if hits >= min(2, len(keywords)):
-            target_file = sf
-            break
-
-    if not target_file:
-        return []
-
-    # 解析 session 文件，按 user 消息分割为对话段
-    # 找到包含关键词的对话段，只返回该段的活动
-    try:
-        lines = target_file.read_text(errors='ignore').splitlines()
-    except Exception:
-        return []
-
-    # 第一遍：找到关键词匹配的 user 消息位置
-    user_msg_indices = []  # (line_index, user_text)
-    for i, ln in enumerate(lines):
-        try:
-            item = json.loads(ln)
-        except Exception:
-            continue
-        msg = item.get('message') or {}
-        if msg.get('role') == 'user':
-            text = ''
-            for c in msg.get('content', []):
-                if c.get('type') == 'text' and c.get('text'):
-                    text += c['text']
-            user_msg_indices.append((i, text))
-
-    # 找到与关键词匹配度最高的 user 消息
-    best_idx = -1
-    best_hits = 0
-    for line_idx, utext in user_msg_indices:
-        hits = sum(1 for kw in keywords if kw.lower() in utext.lower())
-        if hits > best_hits:
-            best_hits = hits
-            best_idx = line_idx
-
-    # 确定对话段的行范围：从匹配的 user 消息到下一个 user 消息之前
-    if best_idx >= 0 and best_hits >= min(2, len(keywords)):
-        # 找下一个 user 消息的位置
-        next_user_idx = len(lines)
-        for line_idx, _ in user_msg_indices:
-            if line_idx > best_idx:
-                next_user_idx = line_idx
-                break
-        start_line = best_idx
-        end_line = next_user_idx
-    else:
-        # 没找到匹配的对话段，返回空
-        return []
-
-    # 第二遍：只解析对话段内的行
-    entries = []
-    for ln in lines[start_line:end_line]:
-        try:
-            item = json.loads(ln)
-        except Exception:
-            continue
-        entry = _parse_activity_entry(item)
-        if entry:
-            entries.append(entry)
-
-    return entries[-limit:]
+    """按关键词从 progress_log 匹配活动（已完成的旧任务不保留 session）。"""
+    return get_agent_activity(agent_id, limit=limit)
 
 
 def get_agent_latest_segment(agent_id, limit=20):
-    """获取 Agent 最新一轮对话段（最后一条 user 消息起的所有内容）。
-    用于活跃任务没有精确匹配时，展示 Agent 的实时工作状态。
-    """
-    sessions_dir = OCLAW_HOME / 'agents' / agent_id / 'sessions'
-    if not sessions_dir.exists():
-        return []
-
-    jsonl_files = sorted(sessions_dir.glob('*.jsonl'),
-                         key=lambda f: f.stat().st_mtime, reverse=True)
-    if not jsonl_files:
-        return []
-
-    # 读取最新的 session 文件
-    target_file = jsonl_files[0]
-    try:
-        lines = target_file.read_text(errors='ignore').splitlines()
-    except Exception:
-        return []
-
-    # 找到最后一条 user 消息的行号
-    last_user_idx = -1
-    for i, ln in enumerate(lines):
-        try:
-            item = json.loads(ln)
-        except Exception:
-            continue
-        msg = item.get('message') or {}
-        if msg.get('role') == 'user':
-            last_user_idx = i
-
-    if last_user_idx < 0:
-        return []
-
-    # 从最后一条 user 消息开始，解析到文件末尾
-    entries = []
-    for ln in lines[last_user_idx:]:
-        try:
-            item = json.loads(ln)
-        except Exception:
-            continue
-        entry = _parse_activity_entry(item)
-        if entry:
-            entries.append(entry)
-
-    return entries[-limit:]
+    """获取 Agent 最新进展条目（progress_log 视角）。"""
+    return get_agent_activity(agent_id, limit=limit)
 
 
 def _compute_phase_durations(flow_log):
@@ -2175,107 +1978,20 @@ def dispatch_for_state(task_id, task, new_state, trigger='state-transition'):
 
     def _do_dispatch():
         try:
-            # Gateway 可能暂时不可达（休眠恢复、进程重启），等待后重试
-            import time as _time
-            _gw_alive = False
-            for _gw_attempt in range(3):
-                if _check_gateway_alive():
-                    _gw_alive = True
-                    break
-                if _gw_attempt < 2:
-                    _time.sleep(5 * (_gw_attempt + 1))  # 5s, 10s
-            if not _gw_alive:
-                log.warning(f'⚠️ {task_id} 自动派发跳过: Gateway 未启动（重试3次仍不可达）')
-                _update_task_scheduler(task_id, lambda t, s: s.update({
-                    'lastDispatchAt': now_iso(),
-                    'lastDispatchStatus': 'gateway-offline',
-                    'lastDispatchAgent': agent_id,
-                    'lastDispatchTrigger': trigger,
-                }))
-                return
-            # Fix #139/#182: dispatch channel 可配置；未配置时不传 --deliver 避免
-            # "unknown channel: feishu" 错误（非飞书用户）
-            _agent_cfg = read_json(DATA / 'agent_config.json', {})
-            _channel = (_agent_cfg.get('dispatchChannel') or '').strip()
-            openclaw_bin = _resolve_openclaw_bin()
-            if not openclaw_bin:
-                err = 'OpenClaw CLI 未找到：请确认已安装 openclaw 并加入 PATH；Windows 可设置 OPENCLAW_BIN 指向 openclaw.cmd'
-                log.warning(f'⚠️ {task_id} 自动派发异常: {err}')
-                _update_task_scheduler(task_id, lambda t, s: (
-                    s.update({
-                        'lastDispatchAt': now_iso(),
-                        'lastDispatchStatus': 'openclaw-missing',
-                        'lastDispatchAgent': agent_id,
-                        'lastDispatchTrigger': trigger,
-                        'lastDispatchError': err,
-                    }),
-                    _scheduler_add_flow(t, f'派发异常：OpenClaw CLI 未找到（{trigger}）', to=t.get('org', ''))
-                ))
-                return
-            cmd = [openclaw_bin, 'agent', '--agent', agent_id, '-m', msg, '--timeout', '300']
-            if _channel:
-                cmd.extend(['--deliver', '--channel', _channel])
-            max_retries = 2
-            err = ''
-            for attempt in range(1, max_retries + 1):
-                log.info(f'🔄 自动派发 {task_id} → {agent_id} (第{attempt}次)...')
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=310)
-                if result.returncode == 0:
-                    log.info(f'✅ {task_id} 自动派发成功 → {agent_id}')
-                    _update_task_scheduler(task_id, lambda t, s: (
-                        s.update({
-                            'lastDispatchAt': now_iso(),
-                            'lastDispatchStatus': 'success',
-                            'lastDispatchAgent': agent_id,
-                            'lastDispatchTrigger': trigger,
-                            'lastDispatchError': '',
-                        }),
-                        _scheduler_add_flow(t, f'派发成功：{agent_id}（{trigger}）', to=t.get('org', ''))
-                    ))
-                    return
-                err = result.stderr[:200] if result.stderr else result.stdout[:200]
-                log.warning(f'⚠️ {task_id} 自动派发失败(第{attempt}次): {err}')
-                if attempt < max_retries:
-                    import time
-                    time.sleep(5)
-            log.error(f'❌ {task_id} 自动派发最终失败 → {agent_id}')
+            _enqueue_dispatch(agent_id, task_id, msg, trigger=trigger)
+            log.info(f'✅ {task_id} 自动派发已入队 → {agent_id}')
             _update_task_scheduler(task_id, lambda t, s: (
                 s.update({
                     'lastDispatchAt': now_iso(),
-                    'lastDispatchStatus': 'failed',
+                    'lastDispatchStatus': 'queued',
                     'lastDispatchAgent': agent_id,
                     'lastDispatchTrigger': trigger,
-                    'lastDispatchError': err,
+                    'lastDispatchError': '',
                 }),
-                _scheduler_add_flow(t, f'派发失败：{agent_id}（{trigger}）', to=t.get('org', ''))
-            ))
-        except subprocess.TimeoutExpired:
-            log.error(f'❌ {task_id} 自动派发超时 → {agent_id}')
-            _update_task_scheduler(task_id, lambda t, s: (
-                s.update({
-                    'lastDispatchAt': now_iso(),
-                    'lastDispatchStatus': 'timeout',
-                    'lastDispatchAgent': agent_id,
-                    'lastDispatchTrigger': trigger,
-                    'lastDispatchError': 'timeout',
-                }),
-                _scheduler_add_flow(t, f'派发超时：{agent_id}（{trigger}）', to=t.get('org', ''))
-            ))
-        except FileNotFoundError as e:
-            err = f'OpenClaw CLI 未找到：{e}'
-            log.warning(f'⚠️ {task_id} 自动派发异常: {err}')
-            _update_task_scheduler(task_id, lambda t, s: (
-                s.update({
-                    'lastDispatchAt': now_iso(),
-                    'lastDispatchStatus': 'openclaw-missing',
-                    'lastDispatchAgent': agent_id,
-                    'lastDispatchTrigger': trigger,
-                    'lastDispatchError': err[:200],
-                }),
-                _scheduler_add_flow(t, f'派发异常：OpenClaw CLI 未找到（{trigger}）', to=t.get('org', ''))
+                _scheduler_add_flow(t, f'派发已入队：{agent_id}（{trigger}）', to=t.get('org', ''))
             ))
         except Exception as e:
-            log.warning(f'⚠️ {task_id} 自动派发异常: {e}')
+            log.warning(f'⚠️ {task_id} 自动派发入队异常: {e}')
             _update_task_scheduler(task_id, lambda t, s: (
                 s.update({
                     'lastDispatchAt': now_iso(),
@@ -2284,7 +2000,7 @@ def dispatch_for_state(task_id, task, new_state, trigger='state-transition'):
                     'lastDispatchTrigger': trigger,
                     'lastDispatchError': str(e)[:200],
                 }),
-                _scheduler_add_flow(t, f'派发异常：{agent_id}（{trigger}）', to=t.get('org', ''))
+                _scheduler_add_flow(t, f'派发入队异常：{agent_id}（{trigger}）', to=t.get('org', ''))
             ))
 
     threading.Thread(target=_do_dispatch, daemon=True).start()
@@ -2574,6 +2290,12 @@ class Handler(BaseHTTPRequestHandler):
         if self._check_auth():
             return
 
+        agent_id = (self.headers.get('X-Agent-ID') or '').strip()
+        guard = _guard_agent_write(agent_id, p, body)
+        if guard is not None:
+            self.send_json(guard, 403)
+            return
+
         if p == '/api/morning-config':
             if not isinstance(body, dict):
                 self.send_json({'ok': False, 'error': '请求体必须是 JSON 对象'}, 400)
@@ -2815,24 +2537,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({'ok': False, 'error': 'agentId and model required'}, 400)
                 return
 
-            # Write to pending (atomic)
-            pending_path = DATA / 'pending_model_changes.json'
-            def update_pending(current):
-                current = [x for x in current if x.get('agentId') != agent_id]
-                current.append({'agentId': agent_id, 'model': model})
-                return current
-            atomic_json_update(pending_path, update_pending, [])
-
-            # Async apply
-            def apply_async():
-                try:
-                    subprocess.run([python_bin(), str(SCRIPTS / 'apply_model_changes.py')], timeout=30)
-                    subprocess.run([python_bin(), str(SCRIPTS / 'sync_agent_config.py')], timeout=10)
-                except Exception as e:
-                    print(f'[apply error] {e}', file=sys.stderr)
-
-            threading.Thread(target=apply_async, daemon=True).start()
-            self.send_json({'ok': True, 'message': f'Queued: {agent_id} → {model}'})
+            # 直接写入 agent_config.json（无 OpenClaw 运行时）
+            try:
+                change = apply_model_change(agent_id, model)
+                self.send_json({'ok': True, 'message': f'Applied: {agent_id} → {model}', 'change': change})
+            except Exception as e:
+                log.warning(f'模型配置写入失败: {e}')
+                self.send_json({'ok': False, 'error': f'模型配置写入失败: {str(e)[:100]}'}, 500)
+            return
 
         # Fix #139: 设置派发渠道（feishu/telegram/wecom/signal/tui）
         elif p == '/api/set-dispatch-channel':
@@ -2919,6 +2631,19 @@ def main():
     migrate_notification_config()
 
     # 启动恢复：重新派发上次被 kill 中断的 queued 任务
+    DATA.mkdir(parents=True, exist_ok=True)
+    if not (DATA / 'agent_config.json').exists():
+        default_cfg = DATA / 'config.default.json'
+        if default_cfg.exists():
+            shutil.copy2(default_cfg, DATA / 'agent_config.json')
+            log.info('已从 config.default.json 初始化 agent_config.json')
+
+    try:
+        snapshot = create_data_backup(data_dir=DATA)
+        log.info(f'启动快照: {snapshot}')
+    except Exception as e:
+        log.warning(f'启动快照失败: {e}')
+
     threading.Timer(3.0, _startup_recover_queued_dispatches).start()
 
     # 定时巡检：每 120 秒自动扫描停滞任务并触发重试/升级/回滚

@@ -1,4 +1,4 @@
-"""Tests for dashboard auto-dispatch error handling."""
+"""Tests for dashboard auto-dispatch queue integration (no OpenClaw CLI)."""
 import json
 import pathlib
 import sys
@@ -8,8 +8,8 @@ sys.path.insert(0, str(ROOT / 'dashboard'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 
 
-def test_dispatch_records_missing_openclaw_cli(monkeypatch, tmp_path):
-    """Missing OpenClaw CLI should become an actionable dispatch status."""
+def test_dispatch_records_queue_entry_and_scheduler_status(monkeypatch, tmp_path):
+    """Dispatch should enqueue into dispatch_queue.json and mark scheduler queued."""
     import server as srv
 
     data_dir = tmp_path / 'data'
@@ -28,16 +28,6 @@ def test_dispatch_records_missing_openclaw_cli(monkeypatch, tmp_path):
 
     monkeypatch.setattr(srv, 'DATA', data_dir)
     monkeypatch.setattr(srv, '_ACTIVE_TASK_DATA_DIR', data_dir)
-    monkeypatch.setattr(srv, '_check_gateway_alive', lambda: True)
-    monkeypatch.setattr(srv, '_resolve_openclaw_bin', lambda: None)
-    monkeypatch.setattr(
-        srv,
-        'save_tasks',
-        lambda tasks: tasks_path.write_text(
-            json.dumps(tasks, ensure_ascii=False),
-            encoding='utf-8',
-        ),
-    )
 
     class ImmediateThread:
         def __init__(self, target=None, daemon=None):
@@ -51,9 +41,13 @@ def test_dispatch_records_missing_openclaw_cli(monkeypatch, tmp_path):
 
     srv.dispatch_for_state(task_id, task, 'Taizi', trigger='test')
 
+    queue = json.loads((data_dir / 'dispatch_queue.json').read_text(encoding='utf-8'))
+    assert queue[-1]['agentId'] == 'taizi'
+    assert queue[-1]['taskId'] == task_id
+    assert queue[-1]['status'] == 'queued'
+
     updated = json.loads(tasks_path.read_text(encoding='utf-8'))[0]
     sched = updated['_scheduler']
-    assert sched['lastDispatchStatus'] == 'openclaw-missing'
-    assert 'OpenClaw CLI 未找到' in sched['lastDispatchError']
-    assert '[WinError 2]' not in sched['lastDispatchError']
-    assert any('OpenClaw CLI 未找到' in item['remark'] for item in updated['flow_log'])
+    assert sched['lastDispatchStatus'] == 'queued'
+    assert sched['lastDispatchAgent'] == 'taizi'
+    assert any('派发已入队' in item['remark'] for item in updated['flow_log'])

@@ -25,11 +25,6 @@ def test_file_url_path_traversal_blocked(tmp_path):
     }))
     srv.DATA = data_dir
 
-    # Create a temp OCLAW_HOME that doesn't contain the secret file
-    oclaw_home = tmp_path / '.openclaw'
-    oclaw_home.mkdir()
-    srv.OCLAW_HOME = oclaw_home
-
     # Create a "secret" file outside any allowed root
     secret_dir = tmp_path / 'secrets'
     secret_dir.mkdir()
@@ -50,7 +45,7 @@ def test_file_url_path_traversal_blocked(tmp_path):
     )
 
 
-def test_file_url_within_allowed_roots_works(tmp_path):
+def test_file_url_within_allowed_roots_works(tmp_path, monkeypatch):
     """file:// URLs within allowed_roots should still work after the fix."""
     import server as srv
 
@@ -62,12 +57,11 @@ def test_file_url_within_allowed_roots_works(tmp_path):
     }))
     srv.DATA = data_dir
 
-    oclaw_home = tmp_path / '.openclaw'
-    oclaw_home.mkdir()
-    srv.OCLAW_HOME = oclaw_home
+    monkeypatch.setattr(srv, 'BASE', tmp_path)
+    monkeypatch.setattr(srv, 'SKILLS_ROOT', tmp_path / 'skills')
 
-    # Place a valid skill file inside OCLAW_HOME (an allowed root)
-    skill_src = oclaw_home / 'shared_skills' / 'goodskill'
+    # Place a valid skill file inside the project root (an allowed root)
+    skill_src = tmp_path / 'shared_skills' / 'goodskill'
     skill_src.mkdir(parents=True)
     good_file = skill_src / 'SKILL.md'
     good_file.write_text('---\nname: goodskill\ndescription: a good skill\n---\n\n# Good Skill\n\nDoes good things.\n')
@@ -89,10 +83,6 @@ def test_file_url_etc_passwd_blocked(tmp_path):
         'agents': [{'id': 'testagent', 'skills': []}]
     }))
     srv.DATA = data_dir
-
-    oclaw_home = tmp_path / '.openclaw'
-    oclaw_home.mkdir()
-    srv.OCLAW_HOME = oclaw_home
 
     result = srv.add_remote_skill('testagent', 'readpasswd', 'file:///etc/passwd')
 

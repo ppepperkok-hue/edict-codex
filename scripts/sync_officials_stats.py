@@ -1,217 +1,222 @@
 #!/usr/bin/env python3
-"""同步各官员统计数据 → data/officials_stats.json"""
-import json, pathlib, datetime, logging
+"""Aggregate official stats from local JSON data -> data/officials_stats.json.
+
+Reads tasks_source.json (progress_log/flow_log), agent_config.json (model
+settings) and audit_log.json instead of OpenClaw runtime files.
+"""
+import datetime
+import pathlib
+import logging
+
 from file_lock import atomic_json_write
-from utils import get_openclaw_home
+from utils import read_json
 
 log = logging.getLogger('officials')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(message)s', datefmt='%H:%M:%S')
 
 BASE = pathlib.Path(__file__).resolve().parent.parent
 DATA = BASE / 'data'
-OPENCLAW_HOME = get_openclaw_home()
-AGENTS_ROOT = OPENCLAW_HOME / 'agents'
-OPENCLAW_CFG = OPENCLAW_HOME / 'openclaw.json'
 
-# Anthropic 定价（每1M token，美元）
+DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6'
+
 MODEL_PRICING = {
-    'anthropic/claude-sonnet-4-6':  {'in':3.0, 'out':15.0, 'cr':0.30, 'cw':3.75},
-    'anthropic/claude-opus-4-5':    {'in':15.0,'out':75.0, 'cr':1.50, 'cw':18.75},
-    'anthropic/claude-haiku-3-5':   {'in':0.8, 'out':4.0,  'cr':0.08, 'cw':1.0},
-    'openai/gpt-4o':                {'in':2.5, 'out':10.0, 'cr':1.25, 'cw':0},
-    'openai/gpt-4o-mini':           {'in':0.15,'out':0.6,  'cr':0.075,'cw':0},
-    'google/gemini-2.0-flash':      {'in':0.075,'out':0.3, 'cr':0,    'cw':0},
-    'google/gemini-2.5-pro':        {'in':1.25,'out':10.0, 'cr':0,    'cw':0},
+    'anthropic/claude-sonnet-4-6':  {'in': 3.0, 'out': 15.0, 'cr': 0.30, 'cw': 3.75},
+    'anthropic/claude-opus-4-5':    {'in': 15.0, 'out': 75.0, 'cr': 1.50, 'cw': 18.75},
+    'anthropic/claude-haiku-3-5':   {'in': 0.8, 'out': 4.0,  'cr': 0.08, 'cw': 1.0},
+    'openai/gpt-4o':                {'in': 2.5, 'out': 10.0, 'cr': 1.25, 'cw': 0},
+    'openai/gpt-4o-mini':           {'in': 0.15, 'out': 0.6,  'cr': 0.075, 'cw': 0},
+    'google/gemini-2.0-flash':      {'in': 0.075, 'out': 0.3, 'cr': 0, 'cw': 0},
+    'google/gemini-2.5-pro':        {'in': 1.25, 'out': 10.0, 'cr': 0, 'cw': 0},
 }
 
 OFFICIALS = [
-    {'id':'taizi',   'label':'太子',  'role':'太子',    'emoji':'🤴','rank':'储君'},
-    {'id':'zhongshu','label':'中书省','role':'中书令',  'emoji':'📜','rank':'正一品'},
-    {'id':'menxia',  'label':'门下省','role':'侍中',    'emoji':'🔍','rank':'正一品'},
-    {'id':'shangshu','label':'尚书省','role':'尚书令',  'emoji':'📮','rank':'正一品'},
-    {'id':'libu',    'label':'礼部',  'role':'礼部尚书','emoji':'📝','rank':'正二品'},
-    {'id':'hubu',    'label':'户部',  'role':'户部尚书','emoji':'💰','rank':'正二品'},
-    {'id':'bingbu',  'label':'兵部',  'role':'兵部尚书','emoji':'⚔️','rank':'正二品'},
-    {'id':'xingbu',  'label':'刑部',  'role':'刑部尚书','emoji':'⚖️','rank':'正二品'},
-    {'id':'gongbu',  'label':'工部',  'role':'工部尚书','emoji':'🔧','rank':'正二品'},
-    {'id':'libu_hr', 'label':'吏部',  'role':'吏部尚书','emoji':'👔','rank':'正二品'},
-    {'id':'zaochao', 'label':'钦天监','role':'朝报官',  'emoji':'📰','rank':'正三品'},
+    {'id': 'taizi',   'label': '太子',  'role': '太子',    'emoji': '🤴', 'rank': '储君'},
+    {'id': 'zhongshu', 'label': '中书省', 'role': '中书令',  'emoji': '📜', 'rank': '正一品'},
+    {'id': 'menxia',  'label': '门下省', 'role': '侍中',    'emoji': '🔍', 'rank': '正一品'},
+    {'id': 'shangshu', 'label': '尚书省', 'role': '尚书令',  'emoji': '📮', 'rank': '正一品'},
+    {'id': 'libu',    'label': '礼部',  'role': '礼部尚书', 'emoji': '📝', 'rank': '正二品'},
+    {'id': 'hubu',    'label': '户部',  'role': '户部尚书', 'emoji': '💰', 'rank': '正二品'},
+    {'id': 'bingbu',  'label': '兵部',  'role': '兵部尚书', 'emoji': '⚔️', 'rank': '正二品'},
+    {'id': 'xingbu',  'label': '刑部',  'role': '刑部尚书', 'emoji': '⚖️', 'rank': '正二品'},
+    {'id': 'gongbu',  'label': '工部',  'role': '工部尚书', 'emoji': '🔧', 'rank': '正二品'},
+    {'id': 'libu_hr', 'label': '吏部',  'role': '吏部尚书', 'emoji': '👔', 'rank': '正二品'},
+    {'id': 'zaochao', 'label': '钦天监', 'role': '朝报官',  'emoji': '📰', 'rank': '正三品'},
 ]
 
-def rj(p, d):
+
+def _as_int(value) -> int:
+    """Coerce unknown progress_log usage values to int (missing -> 0)."""
     try:
-        return json.loads(pathlib.Path(p).read_text(encoding='utf-8'))
-    except Exception:
-        return d
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
-# Pre-load openclaw config once (avoid re-reading per agent)
-_OPENCLAW_CACHE = None
+def _parse_ts(value):
+    """Parse ISO or epoch-ms timestamp; return datetime or None."""
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(value / 1000, tz=datetime.timezone.utc)
+        except (ValueError, OSError):
+            return None
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return None
 
-def _load_openclaw_cfg():
-    global _OPENCLAW_CACHE
-    if _OPENCLAW_CACHE is None:
-        _OPENCLAW_CACHE = rj(OPENCLAW_CFG, {})
-    return _OPENCLAW_CACHE
 
-
-def normalize_model(model_value, fallback='anthropic/claude-sonnet-4-6'):
-    if isinstance(model_value, str) and model_value:
-        return model_value
-    if isinstance(model_value, dict):
-        return model_value.get('primary') or model_value.get('id') or fallback
-    return fallback
-
-def get_model(agent_id):
-    cfg = _load_openclaw_cfg()
-    default = normalize_model(cfg.get('agents',{}).get('defaults',{}).get('model',{}), 'anthropic/claude-sonnet-4-6')
-    for a in cfg.get('agents',{}).get('list',[]):
-        if a.get('id') == agent_id:
-            return normalize_model(a.get('model', default), default)
-    # 兼容历史：太子曾使用 main 作为运行时 id
+def get_model(agent_id: str, agent_cfg: dict) -> str:
+    """Return the configured model for an agent (default fallback)."""
+    default = agent_cfg.get('defaultModel') or DEFAULT_MODEL
+    for entry in agent_cfg.get('agents', []):
+        if entry.get('id') == agent_id and entry.get('model'):
+            return entry['model']
     if agent_id == 'taizi':
-        for a in cfg.get('agents',{}).get('list',[]):
-            if a.get('id') == 'main':
-                return normalize_model(a.get('model', default), default)
+        for entry in agent_cfg.get('agents', []):
+            if entry.get('id') == 'main' and entry.get('model'):
+                return entry['model']
     return default
 
-def scan_agent(agent_id):
-    """从 sessions.json 读取 token 统计（累计所有 session）"""
-    sj = AGENTS_ROOT / agent_id / 'sessions' / 'sessions.json'
-    if not sj.exists() and agent_id == 'taizi':
-        sj = AGENTS_ROOT / 'main' / 'sessions' / 'sessions.json'
-    if not sj.exists():
-        return {'tokens_in':0,'tokens_out':0,'cache_read':0,'cache_write':0,'sessions':0,'last_active':None,'messages':0}
-    
-    data = rj(sj, {})
-    tin = tout = cr = cw = 0
-    last_ts = None
-    
-    for sid, v in data.items():
-        tin += v.get('inputTokens', 0) or 0
-        tout += v.get('outputTokens', 0) or 0
-        cr  += v.get('cacheRead', 0) or 0
-        cw  += v.get('cacheWrite', 0) or 0
-        ts = v.get('updatedAt')
-        if ts:
-            try:
-                t = datetime.datetime.fromtimestamp(ts/1000) if isinstance(ts,int) else datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))
-                if last_ts is None or t > last_ts: last_ts = t
-            except Exception: pass
-    
-    # Estimate message count from most recent session JSONL
-    msg_count = 0
-    if data:
-        try:
-            sf_key = max(data.keys(), key=lambda k: data[k].get('updatedAt',0) or 0, default=None)
-        except Exception:
-            sf_key = None
-    else:
-        sf_key = None
-    if sf_key and data[sf_key].get('sessionFile'):
-        sf = AGENTS_ROOT / agent_id / 'sessions' / pathlib.Path(data[sf_key]['sessionFile']).name
-        try:
-            lines = sf.read_text(errors='ignore').splitlines()
-            for ln in lines:
-                try:
-                    e = json.loads(ln)
-                    if e.get('type') == 'message' and e.get('message',{}).get('role') == 'assistant':
-                        msg_count += 1
-                except Exception: pass
-        except Exception: pass
 
+def scan_progress(tasks: list, agent_id: str) -> dict:
+    """Aggregate usage and activity from progress_log entries per agent."""
+    tokens_in = tokens_out = cache_read = cache_write = messages = sessions = 0
+    last_ts = None
+    for task in tasks:
+        for entry in task.get('progress_log') or []:
+            if entry.get('agent') != agent_id:
+                continue
+            tokens_in += _as_int(entry.get('tokens_in'))
+            tokens_out += _as_int(entry.get('tokens_out'))
+            cache_read += _as_int(entry.get('cache_read'))
+            cache_write += _as_int(entry.get('cache_write'))
+            messages += 1
+            ts = _parse_ts(entry.get('at') or entry.get('ts'))
+            if ts and (last_ts is None or ts > last_ts):
+                last_ts = ts
+    sessions = sum(1 for task in tasks if any(
+        e.get('agent') == agent_id for e in (task.get('progress_log') or [])
+    ))
     return {
-        'tokens_in': tin, 'tokens_out': tout,
-        'cache_read': cr, 'cache_write': cw,
-        'sessions': len(data),
-        'last_active': last_ts.strftime('%Y-%m-%d %H:%M') if last_ts else None,
-        'messages': msg_count,
+        'tokens_in': tokens_in,
+        'tokens_out': tokens_out,
+        'cache_read': cache_read,
+        'cache_write': cache_write,
+        'sessions': sessions,
+        'messages': messages,
+        'last_ts': last_ts,
+        'last_active': last_ts.astimezone().strftime('%Y-%m-%d %H:%M') if last_ts else None,
     }
 
-def calc_cost(s, model):
-    p = MODEL_PRICING.get(model, MODEL_PRICING['anthropic/claude-sonnet-4-6'])
-    usd = (s['tokens_in']/1e6*p['in'] + s['tokens_out']/1e6*p['out']
-         + s['cache_read']/1e6*p['cr'] + s['cache_write']/1e6*p['cw'])
+
+def calc_cost(usage: dict, model: str) -> float:
+    """Estimate USD cost from token usage (unknown models fall back to default)."""
+    price = MODEL_PRICING.get(model, MODEL_PRICING[DEFAULT_MODEL])
+    usd = (
+        usage['tokens_in'] / 1e6 * price['in']
+        + usage['tokens_out'] / 1e6 * price['out']
+        + usage['cache_read'] / 1e6 * price['cr']
+        + usage['cache_write'] / 1e6 * price['cw']
+    )
     return round(usd, 4)
 
-def get_task_stats(org_label, tasks):
-    done   = [t for t in tasks if t.get('state')=='Done' and t.get('org')==org_label]
-    active = [t for t in tasks if t.get('state') in ('Doing','Review','Assigned') and t.get('org')==org_label]
-    fl = sum(1 for t in tasks for f in t.get('flow_log',[])
-             if f.get('from')==org_label or f.get('to')==org_label)
-    # 参与的旨意（JJC）列表
-    participated = []
-    for t in tasks:
-        if not t['id'].startswith('JJC'): continue
-        for f in t.get('flow_log',[]):
-            if f.get('from')==org_label or f.get('to')==org_label:
-                if t['id'] not in [x['id'] for x in participated]:
-                    participated.append({'id':t['id'],'title':t.get('title',''),'state':t.get('state','')})
-                break
-    return {'tasks_done':len(done),'tasks_active':len(active),
-            'flow_participations':fl,'participated_edicts':participated}
 
-def get_hb(agent_id, live_tasks):
-    for t in live_tasks:
-        if t.get('sourceMeta',{}).get('agentId')==agent_id and t.get('heartbeat'):
-            return t['heartbeat']
-    return {'status':'idle','label':'⚪ 待命','ageSec':None}
+def get_task_stats(org_label: str, tasks: list) -> dict:
+    """Count done/active tasks and flow participation for an org."""
+    done = [t for t in tasks if t.get('state') == 'Done' and t.get('org') == org_label]
+    active = [t for t in tasks if t.get('state') in ('Doing', 'Review', 'Assigned') and t.get('org') == org_label]
+    participated = []
+    flow_count = 0
+    for task in tasks:
+        if str(task.get('id', '')).startswith('JJC'):
+            mentioned = any(
+                flow.get('from') == org_label or flow.get('to') == org_label
+                for flow in (task.get('flow_log') or [])
+            )
+            if mentioned:
+                participated.append({
+                    'id': task.get('id', ''),
+                    'title': task.get('title', ''),
+                    'state': task.get('state', ''),
+                })
+        flow_count += sum(
+            1 for flow in (task.get('flow_log') or [])
+            if flow.get('from') == org_label or flow.get('to') == org_label
+        )
+    return {
+        'tasks_done': len(done),
+        'tasks_active': len(active),
+        'flow_participations': flow_count,
+        'participated_edicts': participated,
+    }
+
+
+def build_heartbeat(usage: dict) -> dict:
+    """Map last progress activity to a dashboard heartbeat status."""
+    last_ts = usage.get('last_ts')
+    if not last_ts:
+        return {'status': 'idle', 'label': '⚪ 待命', 'ageSec': None}
+    age = max(0, int((datetime.datetime.now(datetime.timezone.utc) - last_ts).total_seconds()))
+    if age <= 10 * 60:
+        return {'status': 'active', 'label': f'🟢 活跃 {int(age / 60)}分钟前', 'ageSec': age}
+    if age <= 60 * 60:
+        return {'status': 'recent', 'label': f'🟡 最近活跃 {int(age / 60)}分钟前', 'ageSec': age}
+    return {'status': 'idle', 'label': '⚪ 待命', 'ageSec': age}
+
 
 def main():
-    tasks = rj(DATA/'tasks_source.json', [])
-    live  = rj(DATA/'live_status.json', {})
-    live_tasks = live.get('tasks', [])
+    tasks = read_json(DATA / 'tasks_source.json', [])
+    agent_cfg = read_json(DATA / 'agent_config.json', {})
 
     result = []
-    for off in OFFICIALS:
-        model   = get_model(off['id'])
-        ss      = scan_agent(off['id'])
-        ts      = get_task_stats(off['label'], tasks)
-        hb      = get_hb(off['id'], live_tasks)
-        cost_usd = calc_cost(ss, model)
-
+    for official in OFFICIALS:
+        model = get_model(official['id'], agent_cfg)
+        usage = scan_progress(tasks, official['id'])
+        task_stats = get_task_stats(official['label'], tasks)
+        cost_usd = calc_cost(usage, model)
         result.append({
-            **off,
+            **official,
             'model': model,
             'model_short': model.split('/')[-1] if isinstance(model, str) and '/' in model else str(model),
-            'sessions': ss['sessions'],
-            'tokens_in': ss['tokens_in'],
-            'tokens_out': ss['tokens_out'],
-            'cache_read': ss['cache_read'],
-            'cache_write': ss['cache_write'],
-            'tokens_total': ss['tokens_in'] + ss['tokens_out'],
-            'messages': ss['messages'],
+            'sessions': usage['sessions'],
+            'tokens_in': usage['tokens_in'],
+            'tokens_out': usage['tokens_out'],
+            'cache_read': usage['cache_read'],
+            'cache_write': usage['cache_write'],
+            'tokens_total': usage['tokens_in'] + usage['tokens_out'],
+            'messages': usage['messages'],
             'cost_usd': cost_usd,
             'cost_cny': round(cost_usd * 7.25, 2),
-            'last_active': ss['last_active'],
-            'heartbeat': hb,
-            'tasks_done': ts['tasks_done'],
-            'tasks_active': ts['tasks_active'],
-            'flow_participations': ts['flow_participations'],
-            'participated_edicts': ts['participated_edicts'],
-            'merit_score': ts['tasks_done']*10 + ts['flow_participations']*2 + min(ss['sessions'],20),
+            'last_active': usage['last_active'],
+            'heartbeat': build_heartbeat(usage),
+            **task_stats,
+            'merit_score': task_stats['tasks_done'] * 10 + task_stats['flow_participations'] * 2 + min(usage['sessions'], 20),
         })
 
-    result.sort(key=lambda x: x['merit_score'], reverse=True)
-    for i, r in enumerate(result): r['merit_rank'] = i+1
+    result.sort(key=lambda item: item['merit_score'], reverse=True)
+    for index, item in enumerate(result):
+        item['merit_rank'] = index + 1
 
     totals = {
-        'tokens_total': sum(r['tokens_total'] for r in result),
-        'cache_total':  sum(r['cache_read']+r['cache_write'] for r in result),
-        'cost_usd':     round(sum(r['cost_usd'] for r in result), 2),
-        'cost_cny':     round(sum(r['cost_cny'] for r in result), 2),
-        'tasks_done':   sum(r['tasks_done'] for r in result),
+        'tokens_total': sum(item['tokens_total'] for item in result),
+        'cache_total': sum(item['cache_read'] + item['cache_write'] for item in result),
+        'cost_usd': round(sum(item['cost_usd'] for item in result), 2),
+        'cost_cny': round(sum(item['cost_cny'] for item in result), 2),
+        'tasks_done': sum(item['tasks_done'] for item in result),
     }
-    top = max(result, key=lambda x: x['merit_score'], default={})
+    top = max(result, key=lambda item: item['merit_score'], default={})
 
     payload = {
         'generatedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'officials': result,
         'totals': totals,
-        'top_official': top.get('label',''),
+        'top_official': top.get('label', ''),
     }
-    atomic_json_write(DATA/'officials_stats.json', payload)
-    log.info(f'{len(result)} officials | cost=¥{totals["cost_cny"]} | top={top.get("label","")}')
+    atomic_json_write(DATA / 'officials_stats.json', payload)
+    log.info(f'{len(result)} officials | cost=¥{totals["cost_cny"]} | top={top.get("label", "")}')
+
 
 if __name__ == '__main__':
     main()

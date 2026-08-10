@@ -6,27 +6,24 @@ from pathlib import Path
 from unittest import mock
 
 
-def _load_skill_manager(openclaw_home, hub_base=None):
+def _load_skill_manager(hub_base=None):
     root = Path(__file__).resolve().parents[1]
     script_path = root / "scripts" / "skill_manager.py"
 
-    env = {"OPENCLAW_HOME": str(openclaw_home)}
+    env = {}
     if hub_base is not None:
-        env["OPENCLAW_SKILLS_HUB_BASE"] = hub_base
+        env["EDICT_SKILLS_HUB_BASE"] = hub_base
 
     spec = importlib.util.spec_from_file_location("skill_manager_under_test", script_path)
     module = importlib.util.module_from_spec(spec)
     with mock.patch.dict(os.environ, env, clear=False):
-        if hub_base is None:
-            os.environ.pop("OPENCLAW_SKILLS_HUB_BASE", None)
         spec.loader.exec_module(module)
     return module
 
 
 class SkillManagerTests(unittest.TestCase):
     def test_default_skills_do_not_use_removed_openclaw_hub(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            skill_manager = _load_skill_manager(Path(tmp) / ".openclaw")
+        skill_manager = _load_skill_manager()
 
         self.assertIn("mmx_cli", skill_manager.OFFICIAL_SKILLS_HUB)
         self.assertTrue(
@@ -37,11 +34,9 @@ class SkillManagerTests(unittest.TestCase):
         )
 
     def test_custom_hub_base_restores_hub_skill_urls(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            skill_manager = _load_skill_manager(
-                Path(tmp) / ".openclaw",
-                hub_base="https://example.com/openclaw-skills",
-            )
+        skill_manager = _load_skill_manager(
+            hub_base="https://example.com/openclaw-skills",
+        )
 
         self.assertEqual(
             skill_manager.OFFICIAL_SKILLS_HUB["code_review"],
@@ -57,8 +52,7 @@ class SkillManagerTests(unittest.TestCase):
         )
 
     def test_import_official_hub_uses_per_skill_recommended_agents(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            skill_manager = _load_skill_manager(Path(tmp) / ".openclaw")
+        skill_manager = _load_skill_manager()
 
         calls = []
 

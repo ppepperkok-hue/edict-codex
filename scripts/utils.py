@@ -16,12 +16,14 @@ def read_json(path, default=None):
         return default if default is not None else {}
 
 
-def get_openclaw_home() -> pathlib.Path:
-    """Return OpenClaw home directory, respecting OPENCLAW_HOME env var."""
-    env = os.environ.get('OPENCLAW_HOME')
-    if env:
-        return pathlib.Path(env).expanduser()
-    return pathlib.Path.home() / '.openclaw'
+def get_project_root() -> pathlib.Path:
+    """Return the Edict-Codex project root (parent of the scripts dir)."""
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+def get_data_dir() -> pathlib.Path:
+    """Return the runtime data directory for this project (no OpenClaw)."""
+    return get_project_root() / 'data'
 
 
 def now_iso():
