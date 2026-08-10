@@ -1,0 +1,44 @@
+# Runtime data (machine-specific) - keep only the schema and default config
+# template in version control.
+/data/*
+!/data/schema.json
+!/data/config.default.json
+
+# Logs
+*.log
+/tmp/
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
+*.swp
+
+# Node.js
+node_modules/
+edict/frontend/node_modules/
+edict/frontend/dist/
+*.tsbuildinfo
+
+# Vite cache
+.vite/
+
+# IDE
+.vscode/
+
+# Backups
+*.bak*
+
+# Local dev/test scripts
+_*.py
+
+# Generated docs
+*.docx
+*.pdf
