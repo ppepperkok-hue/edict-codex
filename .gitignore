@@ -38,6 +38,7 @@ edict/frontend/dist/
 
 # Local dev/test scripts
 _*.py
+!**/__init__.py
 
 # OpenClaw-only scripts/tests (retained in source history, not shipped)
 scripts/agentrec_advisor.py
