@@ -3,6 +3,7 @@
 /data/*
 !/data/schema.json
 !/data/config.default.json
+!/data/.gitkeep
 
 # Logs
 *.log
@@ -39,16 +40,7 @@ edict/frontend/dist/
 # Local dev/test scripts
 _*.py
 !**/__init__.py
-
-# OpenClaw-only scripts/tests (retained in source history, not shipped)
-scripts/agentrec_advisor.py
-scripts/apply_model_changes.py
-scripts/linucb_router.py
-scripts/run_loop.sh
-scripts/sync_agent_config.py
-scripts/sync_from_openclaw_runtime.py
-tests/test_sync_agent_config.py
-tests/test_sync_symlinks.py
+/work/
 
 # Generated docs
 *.docx
