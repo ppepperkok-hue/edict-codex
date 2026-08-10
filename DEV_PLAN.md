@@ -43,7 +43,7 @@
 | M2 | 服务端适配：配置路径、权限中间件、官员统计、备份/恢复 | 完成 | v0.2.0 |
 | M3 | Codex 编排层：AGENTS.md 协议 + 12 角色模板 | 完成 | v0.3.0 |
 | M4 | 完整功能接通：模型/技能/议政/早朝/模板/奏折 | 完成 | v0.4.0 |
-| M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 待开始 | v0.5.0 |
+| M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 进行中 | v0.5.0 |
 
 ## 决策记录（ADR）
 
@@ -67,6 +67,7 @@
 | M1 | 2026-08-10 | 通过（55 测试基线；e2e done 用例适配新状态机） | 已处置 |
 | M2 | 2026-08-10 | 通过（权限/备份/统计新增测试；修复 create 参数与队列闭环） | 已处置 |
 | M3 | 2026-08-10 | 通过（12 角色模板与 AGENTS.md 协议一致，无 OpenClaw 残留） | 已处置 |
+| M4 | 2026-08-10 | 未单独留档，由 M5 终审覆盖复核 v0.4.0→v0.5.0 全部变更 | M5 终审覆盖 |
 
 ## 测试基线
 
@@ -74,7 +75,7 @@
 python -m pytest tests/ -v
 ```
 
-当前基线：78 passed（M2）。
+当前基线：80 passed（M5 收口前）。
 
 ## 回滚速查
 
@@ -91,6 +92,17 @@ python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 ```
 
 ## 遗留 TODO（M5 范围）
+
+- [x] agents.json 改为 Codex 形态（12 角色 + allowAgents 矩阵，无 OpenClaw 路径）。
+- [x] README/ROADMAP/CONTRIBUTING 收口；删除上游 OpenClaw 版 README_EN/JA/WINDOWS_INSTALL_CN。
+- [x] CLI Windows GBK 控制台兼容（UTF-8 重配置 + --help）与回归测试。
+- [x] skills/{role}/ 占位目录，官员总览显示 12 角色已配置。
+- [ ] M5 端到端演练（含门下封驳路径）。
+- [ ] M5 回滚演练（代码 revert / 数据 restore / 配置 reset）。
+- [ ] 都察院终审 v0.4.0→v0.5.0 diff，Critical/必须修清零。
+- [ ] 终审通过后打 tag v0.5.0 并推送。
+
+> 以下两条为 M4 完成时的旧记录，保留作历史参考：
 
 - \gents.json\ 与 README 仍为上游 OpenClaw 形态，M5 收口时更新。
 - M4 已完成：议政模块改为项目 \data/llm_config.json\ + EDICT_LLM_* 环境变量；删除旧版 \dashboard/dashboard.html\（服务端仅提供 React dist）；server 内置早朝定时线程（默认每日 08:00，读 morning_brief_config.json 的 schedule）。
