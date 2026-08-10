@@ -75,7 +75,7 @@
     {
       "id": "moonshot/kimi-k2.5",
       "label": "moonshot/kimi-k2.5",
-      "provider": "OpenClaw"
+      "provider": "Moonshot"
     }
   ],
   "dispatchChannel": "",

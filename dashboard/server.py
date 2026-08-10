@@ -371,7 +371,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
                 return {'ok': False, 'error': 'URL 无效或不安全（仅支持 HTTPS）'}
             
             # 从 URL 下载，带超时保护
-            req = Request(source_url, headers={'User-Agent': 'OpenClaw-SkillManager/1.0'})
+            req = Request(source_url, headers={'User-Agent': 'Edict-Codex-SkillManager/1.0'})
             try:
                 resp = urlopen(req, timeout=10)
                 content = resp.read(10 * 1024 * 1024).decode('utf-8')  # 最多 10MB

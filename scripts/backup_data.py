@@ -49,7 +49,11 @@ def create_backup(data_dir=None, backups_dir=None, keep=10, label='') -> pathlib
     for path in sorted(data_dir.iterdir()):
         if not path.is_file():
             continue
-        if path.name in _EXCLUDE_NAMES or path.name.endswith(_LOCK_SUFFIX):
+        if (
+            path.name in _EXCLUDE_NAMES
+            or path.name.startswith('.env')
+            or path.name.endswith(_LOCK_SUFFIX)
+        ):
             continue
         content = path.read_bytes()
         (target / path.name).write_bytes(content)

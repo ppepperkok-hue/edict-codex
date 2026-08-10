@@ -39,9 +39,9 @@
 
 | 里程碑 | 内容 | 状态 | Tag |
 |---|---|---|---|
-| M1 | 骨架与工程基座：源码搬运、git 仓库、pytest 基线 | 进行中 | v0.1.0 |
-| M2 | 服务端适配：配置路径、权限中间件、官员统计、备份/恢复 | 进行中 | v0.2.0 |
-| M3 | Codex 编排层：AGENTS.md 协议 + 12 角色模板 | 进行中 | v0.3.0 |
+| M1 | 骨架与工程基座：源码搬运、git 仓库、pytest 基线 | 完成 | v0.1.0 |
+| M2 | 服务端适配：配置路径、权限中间件、官员统计、备份/恢复 | 完成 | v0.2.0 |
+| M3 | Codex 编排层：AGENTS.md 协议 + 12 角色模板 | 完成 | v0.3.0 |
 | M4 | 完整功能接通：模型/技能/议政/早朝/模板/奏折 | 待开始 | v0.4.0 |
 | M5 | 交付验收：端到端演练、回滚演练、终审、文档收口 | 待开始 | v0.5.0 |
 
@@ -55,6 +55,8 @@
 - ADR-006：前端直接复用原仓库 `dashboard/dist/` 构建产物并提交入库；`edict/frontend/` 源码保留供后续修改。
 - ADR-007：废弃 OpenClaw 专属脚本（sync_from_openclaw_runtime / sync_agent_config / apply_model_changes / linucb_router / agentrec_advisor）与对应测试。
 - ADR-008：废弃原测试 `test_sync_agent_config.py`、`test_sync_symlinks.py`（依赖已删脚本）；`test_e2e_kanban.py` 的 done 用例改为走完整状态机路径（Doing→Review→PendingConfirm→Done）。
+- ADR-009：权限模型采用「无头=看板/CLI 特权，带头=按角色校验」；allowAgents 矩阵用于 agent-wake，任务写操作按任务归属校验（比矩阵更贴近执行模型）。
+- ADR-010：看板手动下旨与 agent-wake 写入 `data/dispatch_queue.json`，Codex 主会话按 AGENTS.md 第 8 节轮询消费，形成「看板→Codex」闭环。
 
 ## 审查记录
 
@@ -62,7 +64,9 @@
 
 | 里程碑 | 审查日期 | 结论 | 处置 |
 |---|---|---|---|
-| M1 | 待审 | - | - |
+| M1 | 2026-08-10 | 通过（55 测试基线；e2e done 用例适配新状态机） | 已处置 |
+| M2 | 2026-08-10 | 通过（权限/备份/统计新增测试；修复 create 参数与队列闭环） | 已处置 |
+| M3 | 2026-08-10 | 通过（12 角色模板与 AGENTS.md 协议一致，无 OpenClaw 残留） | 已处置 |
 
 ## 测试基线
 
@@ -85,3 +89,9 @@ python scripts/backup_data.py
 python scripts/restore_data.py --list
 python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 ```
+
+## 遗留 TODO（M4 范围）
+
+- 朝堂议政配置源：`dashboard/court_discuss.py` 仍优先读 `~/.openclaw/openclaw.json` 与 Copilot token 文件，需改为项目配置/环境变量（已有环境变量 fallback）。
+- 旧版前端 `dashboard/dashboard.html` 仍有 Gateway/OpenClaw 文案，确认是否被服务提供并清理或标注废弃。
+- `agents.json` 与 README 仍为上游 OpenClaw 形态，M5 收口时更新。

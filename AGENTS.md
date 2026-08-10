@@ -17,8 +17,10 @@
 1. 闲聊/求助解释 → 直接回复，不建任务。
 2. 正式旨意（写代码、写文档、调研、执行任务）→ 建任务并走三省流程。
 3. 任务编号：`JJC-YYYYMMDD-NNN`（同日递增，从 001 起）。
-4. 建任务使用：`python scripts/kanban_update.py create --id <ID> --title <标题> --org 中书省 --official 中书令`
-   （实际参数以 `python scripts/kanban_update.py --help` 为准，先查后用）。
+4. 建任务使用（位置参数，与 CLI 一致）：
+   `python scripts/kanban_update.py create JJC-YYYYMMDD-NNN "<标题>" Zhongshu 中书省 中书令`
+   其他命令同理：`state <ID> <State> "<说明>"`、`flow <ID> "<from>" "<to>" "<备注>"`、
+   `progress <ID> "<当前动作>" "<计划>"`、`done <ID> "<产出>" "<摘要>"`、`todo <ID> <序号> "<标题>" <status>`。
 5. 建任务后立即 spawn 中书省，附任务 ID、旨意原文、上下文文件路径。
 
 ## 3. 三省六部流程
@@ -77,3 +79,10 @@
 - 每个里程碑由独立「都察院」子 agent 审查 diff；Critical 与必须修清零才推进。
 - 文件 ≤500 行、函数 ≤120 行、嵌套 ≤3 层；不顺手改无关代码。
 - 提交信息用英文，单提交可独立 revert；里程碑过审后 commit + tag + push。
+## 8. 军机处队列（dispatch_queue）轮询
+
+- 看板手动下旨或 `/api/agent-wake` 会把请求写入 `data/dispatch_queue.json`（status=queued）。
+- 主会话（太子）在会话开始时与每次任务收尾后，检查队列：读取 queued 条目，
+  按 agentId 依次 spawn 对应角色（内容取 message），处理完把该条 status 改为 dispatched（含 at/dispatchedAt）。
+- 队列条目字段：`at`、`agentId`、`taskId`、`trigger`、`message`、`status`。
+- 未完成条目不得删除；处理失败改 status=failed 并记录原因。
