@@ -787,6 +787,7 @@ _AGENT_DEPTS = [
     {'id':'xingbu',  'label':'刑部',  'emoji':'⚖️', 'role':'刑部尚书', 'rank':'正二品'},
     {'id':'gongbu',  'label':'工部',  'emoji':'🔧', 'role':'工部尚书', 'rank':'正二品'},
     {'id':'libu_hr', 'label':'吏部',  'emoji':'👔', 'role':'吏部尚书', 'rank':'正二品'},
+    {'id':'qintianjian','label':'钦天监','emoji':'🪐', 'role':'钦天监监正','rank':'正三品'},
     {'id':'zaochao', 'label':'钦天监','emoji':'📰', 'role':'朝报官',   'rank':'正三品'},
 ]
 

@@ -1,99 +1,96 @@
 [
   {
     "id": "taizi",
-    "name": "taizi",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-taizi",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\taizi\\agent",
+    "name": "太子",
+    "role": "皇上代理/分拣",
     "subagents": {
-      "allowAgents": ["zhongshu"]
+      "allowAgents": ["zhongshu", "zaochao"]
     }
   },
   {
     "id": "zhongshu",
-    "name": "zhongshu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-zhongshu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\zhongshu\\agent",
+    "name": "中书省",
+    "role": "中书令/规划",
     "subagents": {
       "allowAgents": ["menxia", "shangshu"]
     }
   },
   {
     "id": "menxia",
-    "name": "menxia",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-menxia",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\menxia\\agent",
+    "name": "门下省",
+    "role": "侍中/审议封驳",
     "subagents": {
       "allowAgents": ["shangshu", "zhongshu"]
     }
   },
   {
     "id": "shangshu",
-    "name": "shangshu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-shangshu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\shangshu\\agent",
+    "name": "尚书省",
+    "role": "尚书令/调度",
     "subagents": {
-      "allowAgents": ["zhongshu", "menxia", "hubu", "libu", "bingbu", "xingbu", "gongbu", "libu_hr"]
+      "allowAgents": ["zhongshu", "menxia", "hubu", "libu", "bingbu", "xingbu", "gongbu", "libu_hr", "qintianjian"]
     }
   },
   {
     "id": "hubu",
-    "name": "hubu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-hubu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\hubu\\agent",
+    "name": "户部",
+    "role": "户部尚书/数据统计",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "libu",
-    "name": "libu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-libu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\libu\\agent",
+    "name": "礼部",
+    "role": "礼部尚书/文档规范",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "bingbu",
-    "name": "bingbu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-bingbu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\bingbu\\agent",
+    "name": "兵部",
+    "role": "兵部尚书/工程实现",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "xingbu",
-    "name": "xingbu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-xingbu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\xingbu\\agent",
+    "name": "刑部",
+    "role": "刑部尚书/质量合规",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "gongbu",
-    "name": "gongbu",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-gongbu",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\gongbu\\agent",
+    "name": "工部",
+    "role": "工部尚书/部署运维",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "libu_hr",
-    "name": "libu_hr",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-libu_hr",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\libu_hr\\agent",
+    "name": "吏部",
+    "role": "吏部尚书/人事管理",
+    "subagents": {
+      "allowAgents": ["shangshu"]
+    }
+  },
+  {
+    "id": "qintianjian",
+    "name": "钦天监",
+    "role": "钦天监监正/数据分析",
     "subagents": {
       "allowAgents": ["shangshu"]
     }
   },
   {
     "id": "zaochao",
-    "name": "zaochao",
-    "workspace": "C:\\Users\\<YOUR_USER>\\.openclaw\\workspace-zaochao",
-    "agentDir": "C:\\Users\\<YOUR_USER>\\.openclaw\\agents\\zaochao\\agent",
+    "name": "早朝官",
+    "role": "朝报官/晨间简报",
     "subagents": {
       "allowAgents": []
     }
