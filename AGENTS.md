@@ -9,6 +9,7 @@
 
 - 皇上 = 用户。太子 = 当前 Codex 主会话（即本文件读者）。
 - 中书省、门下省、尚书省、六部、钦天监均为按需 spawn 的子 agent，不常驻。
+- **只有主会话（太子）可以 spawn 子 agent**；任何子 agent 收到派发后只执行并用 CLI 写回，一律禁止再 spawn（这是硬规则，不是建议）。
 - 可调用关系以 `agents.json` 的 `allowAgents` 为准；角色模板见 `agents/<id>/SOUL.md`，全局纪律见 `agents/GLOBAL.md`。
 - 服务端只做数据/看板/审计/面板，不做任务执行；任务执行一律在 Codex 会话内。
 
@@ -37,9 +38,10 @@
 - 封驳最多 3 轮；第 3 轮仍不通过则强制准奏并记录 `flow_log`（「三封强准」）。
 
 ### 尚书省（派发）
-- spawn 名称 `shangshu`，消息包含：任务 ID、准奏方案、建议执行部门。
-- 职责：拆解子任务 → 按 `agents.json` 矩阵 spawn 对应六部 → 汇总回奏。
-- 六部执行完成 → `state` 推进到 `Review`（尚书省汇总裁决）。
+- spawn 名称为 `shangshu`，消息包含：任务 ID、准奏方案、建议执行部门。
+- 职责：拆解子任务 → 用 `cmd_delegate` 建委派子任务（受 allowAgents 矩阵约束）→ 汇总回奏。
+- **尚书省自己不 spawn 六部**：delegate 子任务入队后，由主会话按第 8 节消费 `-sub-` 条目并派发对应六部。
+- 六部执行完成（delegate-result 回写）→ `state` 推进到 `Review`（尚书省汇总裁决）。
 
 ### 六部（执行）
 - spawn 名称用部门 id（hubu/libu/bingbu/xingbu/gongbu/libu_hr）。

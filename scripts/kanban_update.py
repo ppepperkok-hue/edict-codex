@@ -857,7 +857,15 @@ def cmd_delegate(task_id, from_agent, to_agent, instruction, return_spec=''):
     """创建委派子任务，由目标 Agent 独立执行。
 
     防死锁：记录 delegation_depth 和 delegation_path，超过 3 层或循环委派时拒绝。
+    权限：from_agent 必须在其 allowAgents 名单中包含 to_agent（原项目 can_dispatch_to 语义）。
     """
+    ok, reason = _can_delegate(from_agent, to_agent)
+    if not ok:
+        log.error(f'⛔ 委派被拒: {from_agent} -> {to_agent}: {reason}')
+        _append_audit(task_id, from_agent, 'delegate_rejected', None, to_agent, reason)
+        print(f'[看板] 委派被拒: {reason}', flush=True)
+        return
+
     # 检查父任务，获取委派链信息
     tasks = atomic_json_read(TASKS_FILE, [])
     parent = next((t for t in tasks if t.get('id') == task_id), None)
@@ -921,6 +929,24 @@ def cmd_delegate(task_id, from_agent, to_agent, instruction, return_spec=''):
     _append_audit(task_id, from_agent, 'delegate', to_agent, sub_task_id, instruction)
     if created[0] is not None:
         _enqueue_next_dispatch(created[0])
+
+
+def _can_delegate(from_agent, to_agent):
+    """Check the allowAgents permission matrix before delegating.
+
+    Mirrors can_dispatch_to() from the upstream design: only agents whose
+    allowAgents list contains the target may delegate to it. Execution
+    ministries have empty allowAgents, which terminates recursion.
+    """
+    cfg = atomic_json_read(_BASE / 'data' / 'agent_config.json', {})
+    agents = cfg.get('agents') or []
+    record = next((a for a in agents if a.get('id') == from_agent), None)
+    if not record:
+        return False, f'{from_agent} 不存在'
+    allowed = record.get('allowAgents') or []
+    if to_agent not in allowed:
+        return False, f'{from_agent} 无权委派 {to_agent}（允许: {allowed}）'
+    return True, 'OK'
 
 
 def cmd_delegate_result(sub_task_id, result_json):

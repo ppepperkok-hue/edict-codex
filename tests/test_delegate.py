@@ -20,6 +20,16 @@ def _install(tmp_path, monkeypatch):
     monkeypatch.setattr(kb, "TASK_MEMORY_DIR", data / "task_memory")
     monkeypatch.setattr(kb, "MEMORY_DIR", data / "agent_memory")
     monkeypatch.setattr(kb, "QUEUE_FILE", data / "dispatch_queue.json")
+    cfg = {
+        "agents": [
+            {"id": "taizi", "allowAgents": ["zhongshu"]},
+            {"id": "zhongshu", "allowAgents": ["menxia", "shangshu"]},
+            {"id": "menxia", "allowAgents": ["shangshu", "zhongshu"]},
+            {"id": "shangshu", "allowAgents": ["hubu", "libu", "bingbu", "xingbu", "gongbu", "libu_hr"]},
+            {"id": "bingbu", "allowAgents": []},
+        ]
+    }
+    (data / "agent_config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
     return data
 
 
@@ -79,3 +89,24 @@ def test_delegate_result_writes_back_to_parent_memory(tmp_path, monkeypatch):
     chain = memo["context_chain"]
     assert chain[-1]["agent"] == "libu"
     assert "docs/report.md" in chain[-1]["key_decisions"][0]
+
+
+def test_delegate_enforces_allow_agents_matrix(tmp_path, monkeypatch, capsys):
+    _install(tmp_path, monkeypatch)
+    kb.cmd_create("JJC-PARENT-03", "权限矩阵委派验证", "Assigned", "尚书省", "尚书令")
+
+    # Leaf ministry must not delegate (empty allowAgents -> recursion stop).
+    kb.cmd_delegate("JJC-PARENT-03", "bingbu", "hubu", "越权委派")
+    tasks = _load(tmp_path)
+    delegations = [t for t in tasks if t.get("type") == "delegation"]
+    assert len(delegations) == 0
+    assert "无权委派" in capsys.readouterr().out
+
+    # Unknown from-agent is rejected.
+    kb.cmd_delegate("JJC-PARENT-03", "stranger", "hubu", "未知来源")
+    assert "不存在" in capsys.readouterr().out
+
+    # Authorized delegation still works.
+    kb.cmd_delegate("JJC-PARENT-03", "shangshu", "bingbu", "审查代码", "返回风险清单")
+    tasks = _load(tmp_path)
+    assert any(t.get("type") == "delegation" for t in tasks)
