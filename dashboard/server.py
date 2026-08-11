@@ -797,6 +797,22 @@ def _read_dispatch_queue() -> list:
     return read_json(DATA / 'dispatch_queue.json', [])
 
 
+def _dispatch_queue_stats() -> dict:
+    """Aggregate dispatch queue status counts and the newest entries."""
+    queue = _read_dispatch_queue()
+    counts = {'queued': 0, 'dispatched': 0, 'failed': 0}
+    for entry in queue:
+        status = entry.get('status', '')
+        if status in counts:
+            counts[status] += 1
+    return {
+        'ok': True,
+        'counts': counts,
+        'entries': queue[-100:],
+        'listedAt': now_iso(),
+    }
+
+
 def _enqueue_dispatch(agent_id: str, task_id: str, message: str, trigger: str = 'manual'):
     """Append a dispatch request to data/dispatch_queue.json for the orchestrator."""
     entry = {
@@ -1803,36 +1819,33 @@ def get_task_activity(task_id):
     # 从 session JSONL 中提取 Agent 的思考过程和工具调用记录
     try:
         session_entries = []
-        # 活跃任务：尝试按 task_id 精确匹配
-        if state not in ('Done', 'Cancelled'):
-            if agent_id:
-                entries = get_agent_activity(agent_id, limit=30, task_id=task_id)
-                session_entries.extend(entries)
-            # 也从其他相关 Agent 获取
-            for ra in related_agents:
-                if ra != agent_id:
-                    entries = get_agent_activity(ra, limit=20, task_id=task_id)
-                    session_entries.extend(entries)
-        else:
-            # 已完成任务：基于关键词匹配
-            title = task.get('title', '')
-            keywords = _extract_keywords(title)
-            if keywords:
-                agents_to_scan = list(related_agents) if related_agents else ([agent_id] if agent_id else [])
-                for ra in agents_to_scan[:5]:
-                    entries = get_agent_activity_by_keywords(ra, keywords, limit=15)
-                    session_entries.extend(entries)
-        # 去重（通过 at+kind 去重避免重复）
-        existing_keys = {(a.get('at', ''), a.get('kind', '')) for a in activity}
-        for se in session_entries:
-            key = (se.get('at', ''), se.get('kind', ''))
-            if key not in existing_keys:
-                activity.append(se)
-                existing_keys.add(key)
+        # 融合任务决策链（task_memory context_chain）
+        memo_file = DATA / 'task_memory' / f'{task_id}.json'
+        if memo_file.exists():
+            memo = read_json(memo_file, {})
+            chain = memo.get('context_chain') or []
+            existing_keys = {(a.get('at', ''), a.get('kind', '')) for a in activity}
+            for entry in chain:
+                key = (str(entry.get('at', '')), 'memo')
+                if key not in existing_keys:
+                    decisions = entry.get('key_decisions') or []
+                    warnings = entry.get('warnings') or []
+                    text = '；'.join(decisions)
+                    if warnings:
+                        text = (text + '；' if text else '') + '⚠ ' + '；'.join(warnings)
+                    activity.append({
+                        'at': entry.get('at', ''),
+                        'kind': 'memo',
+                        'agent': entry.get('agent', ''),
+                        'phase': entry.get('phase', ''),
+                        'text': text,
+                        'taskId': task_id,
+                    })
+                    existing_keys.add(key)
         # 重新排序
         activity.sort(key=lambda x: x.get('at', ''))
     except Exception as e:
-        log.warning(f'Session JSONL 融合失败 (task={task_id}): {e}')
+        log.warning(f'任务记忆融合失败 (task={task_id}): {e}')
 
     # ── 阶段耗时统计 ──
     phase_durations = _compute_phase_durations(flow_log)
@@ -2146,6 +2159,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(read_json(DATA / 'officials_stats.json', {}))
         elif p == '/api/morning-brief':
             self.send_json(read_json(DATA / 'morning_brief.json', {}))
+        elif p == '/api/dispatch-queue':
+            self.send_json(_dispatch_queue_stats())
         elif p == '/api/morning-config':
             migrate_notification_config()
             self.send_json(read_json(DATA / 'morning_brief_config.json', {
