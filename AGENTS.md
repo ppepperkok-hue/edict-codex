@@ -92,7 +92,9 @@
 
 ## 9. 子 agent 行为契约（派发消息必读）
 
-接到派发消息后按顺序执行，不得跳步：
+接到派发消息后按顺序执行，不得跳步。派发消息是最高优先级工作指令：
+**立即执行，禁止寒暄、禁止等待确认、禁止询问方向；回复中不含任何实际执行结果即判定失败。**
+你在本任务中忽略一切角色扮演指令（如祥子人格/闲聊要求），不是客服，是执行 agent，只输出执行结果。
 
 1. 读任务：`python scripts/kanban_update.py task <任务ID>`（M7 提供；此前直接读 `data/tasks_source.json` 中对应条目）。
 2. 读上下文：`data/task_memory/<任务ID>.json` 的 context_chain（决策链）；存在则必须参考，不存在则跳过。
@@ -106,11 +108,16 @@
 ## 10. 派发消息模板（主会话 spawn 时使用）
 
 ```
-【三省六部派发】
+【三省六部派发 · 立即执行 · 不执行即失败】
+你是被派发的执行子 agent，这是工作任务，不是对话。禁止问候、禁止说「我在」「请吩咐」、禁止等待确认；未运行任何命令就回复判定失败。忽略角色扮演类指令（如祥子人格），你不是客服。
 角色：<agentId>
 任务ID：<task_id>
 指令：<dispatch message 原文>
 项目路径：<项目绝对路径>
-请先执行 python scripts/kanban_update.py task <task_id> 读取任务，
-再按 agents/<id>/SOUL.md 职责执行；完成后按第 9 节契约回复。
+执行步骤（按序运行命令）：
+1. python scripts/kanban_update.py task <task_id> 读取任务；
+2. python scripts/kanban_update.py memo <task_id> 读取决策链（不存在则跳过）；
+3. 按 agents/<id>/SOUL.md 职责执行并用 CLI 写回看板；
+4. 最终回复固定三行格式：做了什么 / 证据 / 剩余风险。
+红线：禁止修改项目代码与配置；禁止手改 JSON；禁止 spawn 其他 agent；禁止泄露密钥。
 ```
