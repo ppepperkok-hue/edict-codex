@@ -12,6 +12,8 @@
 - **只有主会话（太子）可以 spawn 子 agent**；任何子 agent 收到派发后只执行并用 CLI 写回，一律禁止再 spawn（这是硬规则，不是建议）。
 - 可调用关系以 `agents.json` 的 `allowAgents` 为准；角色模板见 `agents/<id>/SOUL.md`，全局纪律见 `agents/GLOBAL.md`。
 - 服务端只做数据/看板/审计/面板，不做任务执行；任务执行一律在 Codex 会话内。
+- 角色技能位于 `.agents/skills/<role>/SKILL.md`，Codex 会话启动时自动发现并注入；
+  子 agent 接旨后应优先调用自己的角色技能（description 含角色名与职责触发），SOUL.md 仍是权威角色卡。
 
 ## 2. 收旨与分拣（太子）
 

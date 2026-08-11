@@ -55,7 +55,7 @@ BASE = pathlib.Path(__file__).parent
 DIST = BASE / 'dist'          # React 构建产物 (npm run build)
 DATA = BASE.parent / "data"
 SCRIPTS = BASE.parent / 'scripts'
-SKILLS_ROOT = BASE.parent / 'skills'
+SKILLS_ROOT = BASE.parent / '.agents' / 'skills'
 _ACTIVE_TASK_DATA_DIR = None
 
 # 静态资源 MIME 类型
@@ -303,7 +303,7 @@ def read_skill_content(agent_id, skill_name):
     if not skill_path.exists():
         return {'ok': True, 'name': skill_name, 'agent': agent_id, 'content': '(SKILL.md 文件不存在)', 'path': str(skill_path)}
     try:
-        content = skill_path.read_text()
+        content = skill_path.read_text(encoding='utf-8')
         return {'ok': True, 'name': skill_name, 'agent': agent_id, 'content': content, 'path': str(skill_path)}
     except Exception as e:
         return {'ok': False, 'error': str(e)}
@@ -336,7 +336,7 @@ def add_skill_to_agent(agent_id, skill_name, description, trigger=''):
                 f'<!-- 说明产出物格式与交付要求 -->\n\n'
                 f'## 注意事项\n\n'
                 f'- (在此补充约束、限制或特殊规则)\n')
-    skill_md.write_text(template)
+    skill_md.write_text(template, encoding='utf-8')
     return {'ok': True, 'message': f'技能 {skill_name} 已添加到 {agent_id}', 'path': str(skill_md)}
 
 
@@ -389,7 +389,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
             allowed_roots = (BASE.parent.resolve(),)
             if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
                 return {'ok': False, 'error': '路径不在允许的目录范围内'}
-            content = local_path.read_text()
+            content = local_path.read_text(encoding='utf-8')
         
         elif source_url.startswith('/') or source_url.startswith('.'):
             # 本地绝对或相对路径
@@ -400,7 +400,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
             allowed_roots = (BASE.parent.resolve(),)
             if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
                 return {'ok': False, 'error': '路径不在允许的目录范围内'}
-            content = local_path.read_text()
+            content = local_path.read_text(encoding='utf-8')
         
         else:
             return {'ok': False, 'error': '不支持的 URL 格式（仅支持 https://, file://, 或本地路径）'}
@@ -431,7 +431,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
     skill_md = workspace / 'SKILL.md'
     
     # 写入 SKILL.md
-    skill_md.write_text(content)
+    skill_md.write_text(content, encoding='utf-8')
     
     # 保存源信息到 .source.json
     source_info = {
@@ -444,7 +444,7 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
         'status': 'valid',
     }
     source_json = workspace / '.source.json'
-    source_json.write_text(json.dumps(source_info, ensure_ascii=False, indent=2))
+    source_json.write_text(json.dumps(source_info, ensure_ascii=False, indent=2), encoding='utf-8')
     
     return {
         'ok': True,
@@ -483,7 +483,7 @@ def get_remote_skills_list():
                 continue
             
             try:
-                source_info = json.loads(source_json.read_text())
+                source_info = json.loads(source_json.read_text(encoding='utf-8'))
                 # 检查 SKILL.md 是否存在
                 status = 'valid' if skill_md.exists() else 'not-found'
                 remote_skills.append({
@@ -522,7 +522,7 @@ def update_remote_skill(agent_id, skill_name):
         return {'ok': False, 'error': f'技能 {skill_name} 不是远程 skill（无 .source.json）'}
     
     try:
-        source_info = json.loads(source_json.read_text())
+        source_info = json.loads(source_json.read_text(encoding='utf-8'))
         source_url = source_info.get('sourceUrl', '')
         if not source_url:
             return {'ok': False, 'error': '源 URL 不存在'}
@@ -532,7 +532,7 @@ def update_remote_skill(agent_id, skill_name):
                                   source_info.get('description', ''))
         if result['ok']:
             result['message'] = f'技能已更新'
-            source_info_updated = json.loads(source_json.read_text())
+            source_info_updated = json.loads(source_json.read_text(encoding='utf-8'))
             result['newVersion'] = source_info_updated.get('checksum', 'unknown')
         return result
     except Exception as e:
@@ -2370,7 +2370,7 @@ class Handler(BaseHTTPRequestHandler):
             if webhook_legacy and 'notification' not in body:
                 body['notification'] = {'enabled': True, 'channel': 'feishu', 'webhook': webhook_legacy}
             cfg_path = DATA / 'morning_brief_config.json'
-            cfg_path.write_text(json.dumps(body, ensure_ascii=False, indent=2))
+            cfg_path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding='utf-8')
             self.send_json({'ok': True, 'message': '订阅配置已保存'})
             return
 

@@ -89,7 +89,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "taizi",
+          "path": ".agents/skills/taizi/SKILL.md",
+          "description": "太子角色技能"
+        }
+      ],
       "allowAgents": [
         "zhongshu"
       ]
@@ -125,7 +131,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "zhongshu",
+          "path": ".agents/skills/zhongshu/SKILL.md",
+          "description": "中书省角色技能"
+        }
+      ],
       "allowAgents": [
         "menxia",
         "shangshu"
@@ -140,7 +152,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "menxia",
+          "path": ".agents/skills/menxia/SKILL.md",
+          "description": "门下省角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu",
         "zhongshu"
@@ -155,7 +173,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "shangshu",
+          "path": ".agents/skills/shangshu/SKILL.md",
+          "description": "尚书省角色技能"
+        }
+      ],
       "allowAgents": [
         "zhongshu",
         "menxia",
@@ -176,7 +200,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "hubu",
+          "path": ".agents/skills/hubu/SKILL.md",
+          "description": "户部角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -190,7 +220,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "libu",
+          "path": ".agents/skills/libu/SKILL.md",
+          "description": "礼部角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -204,7 +240,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "bingbu",
+          "path": ".agents/skills/bingbu/SKILL.md",
+          "description": "兵部角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -218,7 +260,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "xingbu",
+          "path": ".agents/skills/xingbu/SKILL.md",
+          "description": "刑部角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -232,7 +280,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "gongbu",
+          "path": ".agents/skills/gongbu/SKILL.md",
+          "description": "工部角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -246,7 +300,33 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "libu_hr",
+          "path": ".agents/skills/libu_hr/SKILL.md",
+          "description": "吏部角色技能"
+        }
+      ],
+      "allowAgents": [
+        "shangshu"
+      ]
+    },
+    {
+      "id": "qintianjian",
+      "label": "钦天监",
+      "role": "钦天监监正",
+      "duty": "数据分析与可观测性",
+      "emoji": "🪐",
+      "model": "openai-codex/gpt-5.3-codex",
+      "defaultModel": "openai-codex/gpt-5.3-codex",
+      "isDefaultModel": true,
+      "skills": [
+        {
+          "name": "qintianjian",
+          "path": ".agents/skills/qintianjian/SKILL.md",
+          "description": "钦天监角色技能"
+        }
+      ],
       "allowAgents": [
         "shangshu"
       ]
@@ -260,7 +340,13 @@
       "model": "openai-codex/gpt-5.3-codex",
       "defaultModel": "openai-codex/gpt-5.3-codex",
       "isDefaultModel": true,
-      "skills": [],
+      "skills": [
+        {
+          "name": "zaochao",
+          "path": ".agents/skills/zaochao/SKILL.md",
+          "description": "早朝官角色技能"
+        }
+      ],
       "allowAgents": []
     }
   ]

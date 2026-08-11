@@ -90,3 +90,31 @@ def test_file_url_etc_passwd_blocked(tmp_path):
     assert result['ok'] is False, (
         f"VULNERABILITY: file:// read /etc/passwd! Result: {result}"
     )
+
+
+def test_read_skill_content_utf8(tmp_path, monkeypatch):
+    """UTF-8 SKILL.md must be readable via read_skill_content (GBK default would crash)."""
+    import server as srv
+
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    skill_root = tmp_path / '.agents' / 'skills'
+    (skill_root / 'menxia').mkdir(parents=True)
+    skill_md = skill_root / 'menxia' / 'SKILL.md'
+    skill_md.write_text(
+        '---\nname: menxia\ndescription: 门下省技能\n---\n\n# 门下省\n四维审议\n',
+        encoding='utf-8',
+    )
+    (data_dir / 'agent_config.json').write_text(json.dumps({
+        'agents': [{'id': 'menxia', 'skills': [
+            {'name': 'menxia', 'path': str(skill_md)},
+        ]}]
+    }), encoding='utf-8')
+
+    monkeypatch.setattr(srv, 'BASE', tmp_path)
+    monkeypatch.setattr(srv, 'SKILLS_ROOT', skill_root)
+    srv.DATA = data_dir
+
+    result = srv.read_skill_content('menxia', 'menxia')
+    assert result['ok'] is True, f'Expected ok=True, got: {result}'
+    assert '四维审议' in result.get('content', '')

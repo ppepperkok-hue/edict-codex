@@ -26,7 +26,7 @@
 
 - 军机处看板：旨意看板、省部调度、奏折阁、旨库模板、官员总览、天下要闻、模型配置、技能配置、小任务会话、上朝仪式、朝堂议政。
 - 模型配置面板：读写 `data/agent_config.json`，Codex 编排器 spawn 子 agent 时按配置应用模型。
-- 技能管理：远程技能下载/更新/移除到 `skills/{role}/`。
+- 技能管理：远程技能下载/更新/移除到 `.agents/skills/{role}/`（Codex 项目级 skill，自动发现）。
 - 早朝新闻：服务端每日定时采集 RSS 生成 `data/morning_brief.json`。
 
 ### 明确不做（v1）
@@ -49,6 +49,7 @@
 | M8 | 角色模板与委派接入：12 份 SOUL 角色卡 + groups 文档 | 完成 | v0.8.0 |
 | M9 | 服务端适配与前端拉起：活动流融合、队列端点、start/stop.ps1 | 完成 | v0.9.0 |
 | M10 | 测试与端到端演练：自动入队闭环、queue-ack、委派测试、子 agent 实验 | 完成 | v0.10.0 |
+| M11 | 角色技能接入：12 份 SKILL.md 落地 `.agents/skills/`，技能根迁移，CLI 自动发现实测 | 完成 | v0.11.0 |
 
 
 
@@ -73,6 +74,12 @@
 - ADR-014（M9）：活动流以 progress_log/flow_log/task_memory 为源（session JSONL 融合移除）；看板新增 /api/dispatch-queue；start.ps1/stop.ps1 一键启停（PID 落 data/）。
 - ADR-015（M10）：真实子 agent 派发实验结论——fork_turns=none 模式 5/5 次只回寒暄不执行任务；fork_turns=all 模式会递归 spawn 并篡改看板数据（取消任务、重建任务）。结论：当前 Codex 环境子 agent 不可靠，执行层以「主会话消费 dispatch 队列 + CLI 闭环」为准，子 agent 派发标记为实验特性。
 - ADR-016（M10）：CLI 状态推进（create/state/done/delegate/confirm-reject）自动将下一负责角色入队（去重、终态跳过），保证队列是唯一派发通道；queue-ack 供主会话确认派发结果。
+- ADR-017（M11）：角色技能统一迁移到 `.agents/skills/{role}/SKILL.md`（Codex 项目级 skill 根），
+  `dashboard/server.py` 与 `scripts/skill_manager.py` 的 `SKILLS_ROOT` 同步指向新根，旧 `skills/` 占位目录移除。
+  实证：`codex exec`（v0.147.0）可自动发现并注入项目级技能——暗号探针测试直接命中 SKILL.md 描述；
+  模拟门下省派发时子 agent 自动按 menxia 技能内容回答四维审议/准奏封驳/必读命令。
+  技能正文指向 `agents/<role>/SOUL.md` 保持单一事实源；技能/配置 JSON 读写统一显式
+  UTF-8（修复 GBK 解码崩溃，`tests/test_cwe22_file_url.py` 新增回归测试）。
 
 ## 审查记录
 
@@ -89,6 +96,7 @@
 | M8 | 2026-08-11 | 通过（12 角色卡生成、残留清零、86 全绿） | 已处置 |
 | M9 | 2026-08-11 | 通过（89 全绿；start/stop 实测；页面与队列/活动端点 200） | 已处置 |
 | M10 | 2026-08-11 | 部分通过（队列闭环/自动入队/委派测试 97 全绿；真实子 agent 实验失败，见 ADR-015） | 已处置 |
+| M11 | 2026-08-11 | 通过（角色技能自动发现实测、技能根迁移、P1 编码修复、P2 配置补齐；108 全绿） | 已处置 |
 
 | M4 | 2026-08-10 | 未单独留档，由 M5 终审覆盖复核 v0.4.0→v0.5.0 全部变更 | M5 终审覆盖 |
 
@@ -98,7 +106,7 @@
 python -m pytest tests/ -v
 ```
 
-当前基线：81 passed（M5 终版）。
+当前基线：108 passed。
 
 ## 回滚速查
 
@@ -119,7 +127,7 @@ python scripts/restore_data.py --time "YYYY-MM-DD HH:MM:SS"
 - [x] agents.json 改为 Codex 形态（12 角色 + allowAgents 矩阵，无 OpenClaw 路径）。
 - [x] README/ROADMAP/CONTRIBUTING 收口；删除上游 OpenClaw 版 README_EN/JA/WINDOWS_INSTALL_CN。
 - [x] CLI Windows GBK 控制台兼容（UTF-8 重配置 + --help）与回归测试。
-- [x] skills/{role}/ 占位目录，官员总览显示 12 角色已配置。
+- [x] `.agents/skills/{role}/` 12 份角色技能（Codex 自动发现，已验证 CLI 注入），官员总览显示 12 角色已配置。
 - [x] M5 端到端演练（含门下封驳路径）。
 - [x] M5 回滚演练（代码 revert / 数据 restore / 配置 reset）。
 - [x] 都察院终审 v0.4.0→v0.5.0 diff，Critical/必须修清零。

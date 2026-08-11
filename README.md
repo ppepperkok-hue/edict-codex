@@ -83,7 +83,8 @@ python scripts/kanban_update.py confirm JJC-20260810-001 approve "准予完结"
 
 - `data/config.default.json`：入库的默认配置模板；`data/agent_config.json` 为运行时配置（不入库），
   模型面板的改动写在这里，Codex 编排器 spawn 子 agent 时读取 model 字段作为模型覆盖参数。
-- `skills/{role}/`：每个角色的技能目录，技能面板的增删改查与远程下载都落在项目内。
+- `.agents/skills/{role}/`：每个角色的技能目录（Codex 项目级 skill，自动发现并注入子 agent），
+  技能面板的增删改查与远程下载都落在项目内。
 - 早朝新闻：`data/morning_brief_config.json` 的 `schedule` 控制每日采集时间（服务端内置定时线程，
   默认 08:00），结果写入 `data/morning_brief.json`。
 - 密钥类配置一律走环境变量或 `.env`（已被 .gitignore 排除），不入库、不进备份。

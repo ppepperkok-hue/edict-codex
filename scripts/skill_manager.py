@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils import get_project_root, now_iso, safe_name, read_json
 
 PROJECT_ROOT = get_project_root()
-SKILLS_ROOT = PROJECT_ROOT / 'skills'
+SKILLS_ROOT = PROJECT_ROOT / '.agents' / 'skills'
 SKILLS_HUB_URL_FILE = PROJECT_ROOT / 'skills-hub-url'
 
 
@@ -98,7 +98,7 @@ def add_remote(agent_id: str, name: str, source_url: str, description: str = '')
         return False
     
     # 保存 SKILL.md
-    skill_md.write_text(content)
+    skill_md.write_text(content, encoding='utf-8')
     
     # 保存源信息
     source_info = {
@@ -111,7 +111,7 @@ def add_remote(agent_id: str, name: str, source_url: str, description: str = '')
         'status': 'valid',
     }
     source_json = workspace / '.source.json'
-    source_json.write_text(json.dumps(source_info, ensure_ascii=False, indent=2))
+    source_json.write_text(json.dumps(source_info, ensure_ascii=False, indent=2), encoding='utf-8')
     
     print(f'✅ 技能 {name} 已添加到 {agent_id}')
     print(f'   路径: {skill_md}')
@@ -143,7 +143,7 @@ def list_remote() -> bool:
                 continue
             
             try:
-                source_info = json.loads(source_json.read_text())
+                source_info = json.loads(source_json.read_text(encoding='utf-8'))
                 remote_skills.append({
                     'agent': agent_id,
                     'skill': skill_name,
@@ -184,7 +184,7 @@ def update_remote(agent_id: str, name: str) -> bool:
         return False
     
     try:
-        source_info = json.loads(source_json.read_text())
+        source_info = json.loads(source_json.read_text(encoding='utf-8'))
         source_url = source_info.get('sourceUrl')
         if not source_url:
             print(f'❌ 无效的源 URL')
@@ -231,7 +231,7 @@ def _get_configured_hub_base():
         return env_base
 
     hub_url_file = SKILLS_HUB_URL_FILE
-    return hub_url_file.read_text().strip() if hub_url_file.exists() else None
+    return hub_url_file.read_text(encoding='utf-8').strip() if hub_url_file.exists() else None
 
 
 def _get_hub_url(base, skill_name):
