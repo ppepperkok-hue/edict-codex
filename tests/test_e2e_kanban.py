@@ -10,6 +10,8 @@ _SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'scripts')
 os.chdir(_SCRIPTS_DIR)
 sys.path.insert(0, '.')
 
+import kanban_update as kb
+
 from kanban_update import (
     _sanitize_title, _sanitize_remark, _is_valid_task_title,
     cmd_create, cmd_flow, cmd_state, cmd_done, cmd_confirm, load, TASKS_FILE
@@ -29,9 +31,14 @@ def _get_task(tid):
 
 
 @pytest.fixture(autouse=True)
-def _backup_and_restore():
+def _backup_and_restore(tmp_path, monkeypatch):
     """每个测试前备份数据，测试后恢复并清理测试任务。"""
     backup = TASKS_FILE.read_text(encoding='utf-8')
+    # Isolate the dispatch queue so auto-enqueue during tests never
+    # touches the real data/dispatch_queue.json.
+    qf = tmp_path / 'dispatch_queue.json'
+    qf.write_text('[]', encoding='utf-8')
+    monkeypatch.setattr(kb, 'QUEUE_FILE', qf)
     yield
     TASKS_FILE.write_text(backup, encoding='utf-8')
     tasks = json.loads(TASKS_FILE.read_text(encoding='utf-8'))

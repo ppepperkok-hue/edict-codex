@@ -2,12 +2,21 @@
 import json
 import pathlib
 import sys
+import pytest
 
 # Ensure scripts/ is importable
 SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import kanban_update as kb
+
+
+@pytest.fixture(autouse=True)
+def _isolate_queue(tmp_path, monkeypatch):
+    """Redirect the dispatch queue so tests never touch the real one."""
+    qf = tmp_path / "dispatch_queue.json"
+    qf.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(kb, "QUEUE_FILE", qf)
 
 
 def test_create_and_get(tmp_path):
