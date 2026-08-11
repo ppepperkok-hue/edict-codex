@@ -35,7 +35,7 @@
 - spawn 名称 `menxia`，消息包含：任务 ID、中书方案全文。
 - 审核四维：可行性 / 完整性 / 风险与资源 / 验收标准是否可测。
 - 准奏 → `state Menxia → Assigned`；封驳 → 退回中书省，`flow_log` 必须写明具体修改意见。
-- 封驳最多 3 轮；第 3 轮仍不通过则强制准奏并记录 `flow_log`（「三封强准」）。
+- 封驳最多 3 轮；第 3 轮起禁止再次封驳（「三封强准」，CLI 与服务端均强制拦截），只能准奏或由皇上裁决。
 
 ### 尚书省（派发）
 - spawn 名称为 `shangshu`，消息包含：任务 ID、准奏方案、建议执行部门。
@@ -89,7 +89,7 @@
 - 心跳条目（trigger=heartbeat 或 message 含「心跳检测」）：主会话直接改 status=dispatched，dispatchNote=「太子代确认在线」，不 spawn。
 - 委派子任务条目（taskId 以 `-sub-` 结尾）：按条目 delegation.to 派发对应角色，消息附 delegation.instruction 与 return_spec。
 - 常规条目：按 agentId 读取 `agents/<id>/SOUL.md`，spawn 子 agent（fork_turns=none），消息严格使用第 10 节模板。
-- 完成判定：子 agent 返回且看板状态有推进（progress/state/todo/flow 任一更新），条目标记 dispatched（记 dispatchedAt 与 dispatchNote）；无推进或子 agent 未响应，标记 failed（记原因，保留条目）。
+- 完成判定（客观步骤）：派发前执行 `python scripts/kanban_update.py task <任务ID> --updated-at` 记录 T0；子 agent 返回后再次执行对比，updatedAt 有变化（progress/state/todo/flow 任一写入都会更新 updatedAt）才 `queue-ack ... dispatched`，无变化或子 agent 未响应则 `queue-ack ... failed`（记原因，保留条目）。
 - 队列维护：dispatched/failed 条目保留最近 200 条，更早的用维护命令清理（M7 提供）。
 
 ## 9. 子 agent 行为契约（派发消息必读）
