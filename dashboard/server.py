@@ -797,6 +797,26 @@ def _read_dispatch_queue() -> list:
     return read_json(DATA / 'dispatch_queue.json', [])
 
 
+def _task_has_queued_dispatch(task_id: str) -> bool:
+    """True when the Codex orchestrator still has a queued dispatch for a task.
+
+    The scheduler must not retry/escalate/rollback a task the orchestrator is
+    already consuming; doing so caused duplicate enqueues and false rollbacks
+    during real sub-agent drills.
+    """
+    return any(
+        entry.get('taskId') == task_id and entry.get('status') == 'queued'
+        for entry in _read_dispatch_queue()
+    )
+
+
+def _latest_progress_ts(sched, task):
+    """Newest of the scheduler heartbeat and the task's last write time."""
+    ts = [_parse_iso(sched.get('lastProgressAt')), _parse_iso(task.get('updatedAt'))]
+    ts = [t for t in ts if t]
+    return max(ts) if ts else None
+
+
 def _dispatch_queue_stats() -> dict:
     """Aggregate dispatch queue status counts and the newest entries."""
     queue = _read_dispatch_queue()
@@ -1302,9 +1322,14 @@ def handle_scheduler_scan(threshold_sec=600):
             if state == 'Blocked':
                 continue
 
+            # In-flight dispatch means the orchestrator is handling the task;
+            # never let the scanner compete with it.
+            if _task_has_queued_dispatch(task_id):
+                continue
+
             sched = _ensure_scheduler(task)
             task_threshold = int(sched.get('stallThresholdSec') or threshold_sec)
-            last_progress = _parse_iso(sched.get('lastProgressAt') or task.get('updatedAt'))
+            last_progress = _latest_progress_ts(sched, task)
             if not last_progress:
                 continue
             stalled_sec = max(0, int((now_dt - last_progress).total_seconds()))
