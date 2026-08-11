@@ -163,17 +163,17 @@ def _append_audit(task_id, agent, action, old_val=None, new_val=None, reason="")
 
 # ── 越权检测（Agent 权限策略）──
 AGENT_POLICY = {
-    "taizi":    {"role": "coordination", "commands": {"create", "state", "flow", "progress", "todo", "memory", "task-memo"}},
-    "zhongshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "memory", "task-memo", "delegate"}},
-    "menxia":   {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "memory", "task-memo"}},
-    "shangshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "delegate", "memory", "task-memo", "shared-memo"}},
-    "zaochao":  {"role": "coordination", "commands": {"progress", "todo", "memory"}},
-    "hubu":     {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
-    "libu":     {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
-    "bingbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
-    "xingbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
-    "gongbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
-    "libu_hr":  {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result"}},
+    "taizi":    {"role": "coordination", "commands": {"create", "state", "flow", "progress", "todo", "memory", "task-memo", "task", "memo", "memory-view", "queue-purge"}},
+    "zhongshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "memory", "task-memo", "delegate", "task", "memo", "memory-view"}},
+    "menxia":   {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "memory", "task-memo", "task", "memo", "memory-view"}},
+    "shangshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "delegate", "memory", "task-memo", "shared-memo", "task", "memo", "memory-view"}},
+    "zaochao":  {"role": "coordination", "commands": {"progress", "todo", "memory", "task", "memo", "memory-view"}},
+    "hubu":     {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
+    "libu":     {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
+    "bingbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
+    "xingbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
+    "gongbu":   {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
+    "libu_hr":  {"role": "execution", "commands": {"progress", "todo", "done", "block", "memory", "task-memo", "delegate-result", "task", "memo", "memory-view"}},
 }
 
 def _check_permission(agent_id, cmd):
@@ -945,11 +945,88 @@ def cmd_delegate_result(sub_task_id, result_json):
     log.info(f'✅ 委派结果 {sub_task_id} → 父任务 {parent_id}')
     _append_audit(parent_id, to_agent, 'delegate_result', sub_task_id, None, result_json[:100])
 
+QUEUE_FILE = _BASE / 'data' / 'dispatch_queue.json'
+
+
+def cmd_task_view(task_id):
+    """View a task's full state and recent flow/progress summary (read-only)."""
+    tasks = atomic_json_read(TASKS_FILE, [])
+    t = find_task(tasks, task_id)
+    if not t:
+        print(f'任务不存在: {task_id}')
+        return
+    summary = {
+        'id': t.get('id'),
+        'title': t.get('title'),
+        'state': t.get('state'),
+        'org': t.get('org'),
+        'official': t.get('official'),
+        'now': t.get('now'),
+        'eta': t.get('eta'),
+        'block': t.get('block'),
+        'output': t.get('output'),
+        'ac': t.get('ac'),
+        'todos': t.get('todos', []),
+        'flow_log': (t.get('flow_log') or [])[-10:],
+        'progress_log': [
+            {'at': e.get('at'), 'agent': e.get('agent'), 'text': e.get('text')}
+            for e in (t.get('progress_log') or [])[-10:]
+        ],
+        'delegation': t.get('delegation'),
+        'updatedAt': t.get('updatedAt'),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_memo_view(task_id):
+    """View a task's decision chain (data/task_memory/<task_id>.json)."""
+    memo_file = TASK_MEMORY_DIR / f'{task_id}.json'
+    if not memo_file.exists():
+        print(f'任务记忆不存在: {task_id}')
+        return
+    data = atomic_json_read(memo_file, {})
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def cmd_memory_view(agent_id):
+    """View an agent's persistent memory (data/agent_memory/<agent_id>.json)."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', agent_id or ''):
+        print(f'非法 agent_id: {agent_id}')
+        return
+    mem_file = MEMORY_DIR / f'{agent_id}.json'
+    if not mem_file.exists():
+        print(f'Agent 记忆不存在: {agent_id}')
+        return
+    data = atomic_json_read(mem_file, {})
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def cmd_queue_purge(keep=200):
+    """Trim dispatch queue to the newest N entries (maintenance)."""
+    if not QUEUE_FILE.exists():
+        print('队列不存在')
+        return
+    keep = max(1, int(keep))
+
+    def modifier(queue):
+        if not isinstance(queue, list):
+            queue = []
+        if len(queue) > keep:
+            return queue[-keep:]
+        return queue
+
+    before = len(atomic_json_read(QUEUE_FILE, []))
+    atomic_json_update(QUEUE_FILE, modifier, [])
+    after = len(atomic_json_read(QUEUE_FILE, []))
+    print(f'队列清理完成: {before} -> {after}（保留最近 {keep} 条）')
+
+
 _CMD_MIN_ARGS = {
     'create': 6, 'state': 3, 'flow': 5, 'done': 2, 'block': 3, 'confirm': 3,
     'todo': 4, 'progress': 3,
     'memory': 4, 'task-memo': 4, 'shared-memo': 3,
     'delegate': 5, 'delegate-result': 3,
+    'task': 2, 'memo': 2, 'memory-view': 2, 'queue-purge': 1,
 }
 
 if __name__ == '__main__':
@@ -1029,6 +1106,20 @@ if __name__ == '__main__':
                      args[5] if len(args) > 5 else '')
     elif cmd == 'delegate-result':
         cmd_delegate_result(args[1], args[2])
+    elif cmd == 'task':
+        cmd_task_view(args[1])
+    elif cmd == 'memo':
+        cmd_memo_view(args[1])
+    elif cmd == 'memory-view':
+        cmd_memory_view(args[1])
+    elif cmd == 'queue-purge':
+        keep = 200
+        if len(args) > 1 and args[1] == '--keep' and len(args) > 2:
+            try:
+                keep = int(args[2])
+            except ValueError:
+                keep = 200
+        cmd_queue_purge(keep)
     else:
         print(__doc__)
         sys.exit(1)
