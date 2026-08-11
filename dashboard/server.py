@@ -746,6 +746,8 @@ def handle_review_action(task_id, action, comment=''):
             to_dept = '皇上'
     elif action == 'reject':
         round_num = (task.get('review_round') or 0) + 1
+        if round_num > 3:
+            return {'ok': False, 'error': f'三封强准：已封驳 {task.get("review_round")} 轮，禁止再次打回，请准奏或由皇上裁决'}
         task['review_round'] = round_num
         task['state'] = 'Zhongshu'
         task['now'] = f'封驳退回中书省修订（第{round_num}轮）'
@@ -847,6 +849,13 @@ def _enqueue_dispatch(agent_id: str, task_id: str, message: str, trigger: str = 
     def modifier(queue):
         if not isinstance(queue, list):
             queue = []
+        for q in queue:
+            if (
+                q.get('taskId') == task_id
+                and q.get('agentId') == agent_id
+                and q.get('status') == 'queued'
+            ):
+                return queue
         queue.append(entry)
         return queue[-200:]
 
@@ -1584,16 +1593,6 @@ def apply_model_change(agent_id: str, model: str) -> dict:
         'ts': now_iso(),
     })
     return change
-
-
-def get_agent_activity_by_keywords(agent_id, keywords, limit=20):
-    """按关键词从 progress_log 匹配活动（已完成的旧任务不保留 session）。"""
-    return get_agent_activity(agent_id, limit=limit)
-
-
-def get_agent_latest_segment(agent_id, limit=20):
-    """获取 Agent 最新进展条目（progress_log 视角）。"""
-    return get_agent_activity(agent_id, limit=limit)
 
 
 def _compute_phase_durations(flow_log):

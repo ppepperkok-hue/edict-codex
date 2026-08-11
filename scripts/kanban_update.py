@@ -393,6 +393,15 @@ def cmd_state(task_id, new_state, now_text=None):
             log.warning(f'⚠️ 非法状态转换 {task_id}: {old_state[0]} → {new_state}（允许: {allowed}）')
             rejected[0] = True
             return tasks
+        # 三封强准：门下省封驳满 3 轮后禁止再次打回，必须准奏或由皇上裁决
+        if (
+            old_state[0] == 'Menxia'
+            and new_state == 'Zhongshu'
+            and int(t.get('review_round') or 0) >= 3
+        ):
+            log.warning(f'⚠️ 三封强准 {task_id}: 已封驳 {t.get("review_round")} 轮，禁止再次打回')
+            rejected[0] = True
+            return tasks
         # 高风险操作拦截 → 进入 PendingConfirm
         if (old_state[0], new_state) in HIGH_RISK_TRANSITIONS:
             t['state'] = 'PendingConfirm'
@@ -998,12 +1007,15 @@ def cmd_delegate_result(sub_task_id, result_json):
 QUEUE_FILE = _BASE / 'data' / 'dispatch_queue.json'
 
 
-def cmd_task_view(task_id):
+def cmd_task_view(task_id, updated_at_only=False):
     """View a task's full state and recent flow/progress summary (read-only)."""
     tasks = atomic_json_read(TASKS_FILE, [])
     t = find_task(tasks, task_id)
     if not t:
         print(f'任务不存在: {task_id}')
+        return
+    if updated_at_only:
+        print(t.get('updatedAt', ''))
         return
     summary = {
         'id': t.get('id'),
@@ -1109,6 +1121,31 @@ def cmd_queue_ack(task_id, agent_id, status, note=''):
         print(f'未找到匹配的 queued 条目: {task_id}/{agent_id}')
 
 
+# 角色化派发消息（对齐原版 dispatch_for_state 的 _msgs 措辞）
+_DISPATCH_MSGS = {
+    'taizi': (
+        '📜 皇上旨意需要你处理\n任务ID: {task_id}\n旨意: {title}\n'
+        '⚠️ 看板已有此任务，请勿重复创建。直接用 kanban_update.py 更新状态。\n'
+        '请立即转交中书省起草执行方案。'
+    ),
+    'zhongshu': (
+        '📜 旨意已到中书省，请起草方案\n任务ID: {task_id}\n旨意: {title}\n'
+        '⚠️ 看板已有此任务记录，请勿重复创建。直接用 kanban_update.py state 更新状态。\n'
+        '请立即起草执行方案，走完完整三省流程（中书起草→门下审议→尚书派发→六部执行）。'
+    ),
+    'menxia': (
+        '📋 中书省方案提交审议\n任务ID: {task_id}\n旨意: {title}\n'
+        '⚠️ 看板已有此任务，请勿重复创建。\n'
+        '请审议中书省方案，给出准奏或封驳意见。'
+    ),
+    'shangshu': (
+        '📮 门下省已准奏，请派发执行\n任务ID: {task_id}\n旨意: {title}\n'
+        '⚠️ 看板已有此任务，请勿重复创建。\n'
+        '请分析方案并派发给六部执行。'
+    ),
+}
+
+
 def _enqueue_next_dispatch(task):
     """After a CLI state change, enqueue the next responsible agent.
 
@@ -1128,12 +1165,16 @@ def _enqueue_next_dispatch(task):
         return
     task_id = task.get('id', '')
     title = str(task.get('title', ''))[:60]
+    msg = _DISPATCH_MSGS.get(
+        agent_id,
+        '📌 请处理任务\n任务ID: {task_id}\n旨意: {title}\n⚠️ 看板已有此任务，请勿重复创建。直接用 kanban_update.py 更新状态。',
+    ).format(task_id=task_id, title=title)
     entry = {
         'at': now_iso(),
         'agentId': agent_id,
         'taskId': task_id,
         'trigger': 'state-transition',
-        'message': f'📜 任务 {task_id}（{title}）状态为 {state}，请按职责处理。',
+        'message': msg,
         'status': 'queued',
     }
 
@@ -1240,7 +1281,10 @@ if __name__ == '__main__':
     elif cmd == 'delegate-result':
         cmd_delegate_result(args[1], args[2])
     elif cmd == 'task':
-        cmd_task_view(args[1])
+        if len(args) > 1 and args[1] == '--updated-at' and len(args) > 2:
+            cmd_task_view(args[2], updated_at_only=True)
+        else:
+            cmd_task_view(args[1])
     elif cmd == 'memo':
         cmd_memo_view(args[1])
     elif cmd == 'memory-view':

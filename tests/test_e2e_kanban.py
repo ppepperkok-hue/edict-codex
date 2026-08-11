@@ -34,16 +34,21 @@ def _get_task(tid):
 def _backup_and_restore(tmp_path, monkeypatch):
     """每个测试前备份数据，测试后恢复并清理测试任务。"""
     backup = TASKS_FILE.read_text(encoding='utf-8')
-    # Isolate the dispatch queue so auto-enqueue during tests never
-    # touches the real data/dispatch_queue.json.
+    # Isolate the dispatch queue AND the task file so tests never touch
+    # the real data/ directory (avoids file races with a running server).
     qf = tmp_path / 'dispatch_queue.json'
     qf.write_text('[]', encoding='utf-8')
+    tf = tmp_path / 'tasks_source.json'
+    tf.write_text(backup, encoding='utf-8')
     monkeypatch.setattr(kb, 'QUEUE_FILE', qf)
+    monkeypatch.setattr(kb, 'TASKS_FILE', tf)
+    monkeypatch.setattr(sys.modules[__name__], 'TASKS_FILE', tf)
+    monkeypatch.setattr(sys.modules[__name__], 'data_dir', tmp_path)
     yield
-    TASKS_FILE.write_text(backup, encoding='utf-8')
-    tasks = json.loads(TASKS_FILE.read_text(encoding='utf-8'))
+    tf.write_text(backup, encoding='utf-8')
+    tasks = json.loads(tf.read_text(encoding='utf-8'))
     tasks = [t for t in tasks if not t.get('id', '').startswith('JJC-TEST-')]
-    TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding='utf-8')
+    tf.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 # ── TEST 1: 脏标题(含文件路径+Conversation)应被清洗后创建
