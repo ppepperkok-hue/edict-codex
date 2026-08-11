@@ -1158,9 +1158,14 @@ def _enqueue_next_dispatch(task):
     state = task.get('state', '')
     if state in ('Done', 'Cancelled', 'PendingConfirm'):
         return
-    agent_id = _STATE_AGENT_MAP.get(state)
-    if agent_id is None and state in ('Doing', 'Next'):
-        agent_id = _ORG_AGENT_MAP.get(task.get('org', ''))
+    delegation = task.get('delegation') or {}
+    if delegation.get('to'):
+        # 委派子任务：目标 agent 直接由 delegation.to 决定
+        agent_id = delegation['to']
+    else:
+        agent_id = _STATE_AGENT_MAP.get(state)
+        if agent_id is None and state in ('Doing', 'Next'):
+            agent_id = _ORG_AGENT_MAP.get(task.get('org', ''))
     if not agent_id:
         return
     task_id = task.get('id', '')

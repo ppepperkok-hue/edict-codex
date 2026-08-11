@@ -110,3 +110,17 @@ def test_delegate_enforces_allow_agents_matrix(tmp_path, monkeypatch, capsys):
     kb.cmd_delegate("JJC-PARENT-03", "shangshu", "bingbu", "审查代码", "返回风险清单")
     tasks = _load(tmp_path)
     assert any(t.get("type") == "delegation" for t in tasks)
+
+
+def test_delegate_subtask_enqueues_target_agent(tmp_path, monkeypatch):
+    data = _install(tmp_path, monkeypatch)
+    kb.cmd_create("JJC-PARENT-04", "委派入队验证任务", "Assigned", "尚书省", "尚书令")
+    kb.cmd_delegate("JJC-PARENT-04", "shangshu", "bingbu", "审查代码", "返回结论")
+
+    queue = json.loads(kb.QUEUE_FILE.read_text(encoding="utf-8"))
+    sub_entries = [
+        e for e in queue
+        if "-sub-" in str(e.get("taskId", "")) and e.get("agentId") == "bingbu" and e.get("status") == "queued"
+    ]
+    assert len(sub_entries) == 1, "delegation subtask must enqueue its target agent"
+    assert "审查代码" in sub_entries[0]["message"]
