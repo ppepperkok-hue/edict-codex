@@ -163,7 +163,7 @@ def _append_audit(task_id, agent, action, old_val=None, new_val=None, reason="")
 
 # ── 越权检测（Agent 权限策略）──
 AGENT_POLICY = {
-    "taizi":    {"role": "coordination", "commands": {"create", "state", "flow", "progress", "todo", "memory", "task-memo", "task", "memo", "memory-view", "queue-purge"}},
+    "taizi":    {"role": "coordination", "commands": {"create", "state", "flow", "progress", "todo", "memory", "task-memo", "task", "memo", "memory-view", "queue-purge", "queue-ack"}},
     "zhongshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "memory", "task-memo", "delegate", "task", "memo", "memory-view"}},
     "menxia":   {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "memory", "task-memo", "task", "memo", "memory-view"}},
     "shangshu": {"role": "coordination", "commands": {"state", "flow", "progress", "todo", "confirm", "delegate", "memory", "task-memo", "shared-memo", "task", "memo", "memory-view"}},
@@ -376,6 +376,7 @@ def cmd_state(task_id, new_state, now_text=None):
     old_state = [None]
     rejected = [False]
     pending_confirm = [False]
+    updated = [None]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
@@ -407,6 +408,7 @@ def cmd_state(task_id, new_state, now_text=None):
         if now_text:
             t['now'] = now_text
         t['updatedAt'] = now_iso()
+        updated[0] = dict(t)
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
     _trigger_refresh()
@@ -419,6 +421,8 @@ def cmd_state(task_id, new_state, now_text=None):
     else:
         log.info(f'✅ {task_id} 状态更新: {old_state[0]} → {new_state}')
         _append_audit(task_id, _infer_agent_id_from_runtime(), 'state', old_state[0], new_state, now_text or '')
+        if updated[0] is not None:
+            _enqueue_next_dispatch(updated[0])
 
 
 def cmd_flow(task_id, from_dept, to_dept, remark):
@@ -449,6 +453,7 @@ def cmd_done(task_id, output_path='', summary=''):
     """执行部门回报完成，任务进入 Review 待尚书省汇总审查。"""
     rejected = [False]
     reject_reason = ['']
+    updated = [None]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
@@ -470,6 +475,7 @@ def cmd_done(task_id, output_path='', summary=''):
         t['org'] = STATE_ORG_MAP.get('Review', t.get('org', ''))
         t['output'] = output_path
         t['now'] = summary or '执行已完成，提交尚书省汇总审查'
+        updated[0] = dict(t)
         t.setdefault('flow_log', []).append({
             "at": now_iso(), "from": from_org,
             "to": "尚书省", "remark": f"✅ 执行完成，提交审查：{summary or '待尚书省汇总'}"
@@ -492,6 +498,8 @@ def cmd_done(task_id, output_path='', summary=''):
         return
     log.info(f'✅ {task_id} 执行完成，已提交尚书省审查')
     _append_audit(task_id, _infer_agent_id_from_runtime(), 'done', None, 'Review', summary or '')
+    if updated[0] is not None:
+        _enqueue_next_dispatch(updated[0])
 
 
 def cmd_block(task_id, reason):
@@ -518,6 +526,8 @@ def cmd_confirm(task_id, action, reason=''):
     """
     result_state = [None]
     rejected = [False]
+    updated = [None]
+
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
@@ -535,12 +545,14 @@ def cmd_confirm(task_id, action, reason=''):
                 t['org'] = STATE_ORG_MAP[target]
             t['now'] = reason or f'确认通过 → {target}'
             result_state[0] = target
+            updated[0] = dict(t)
         elif action == 'reject':
             # 驳回 → 回到 Review
             t['state'] = 'Review'
             t['org'] = STATE_ORG_MAP.get('Review', t.get('org', ''))
             t['now'] = reason or '确认被驳回，退回复审'
             result_state[0] = 'Review'
+            updated[0] = dict(t)
         else:
             log.error(f'未知 confirm 操作: {action}')
             rejected[0] = True
@@ -552,6 +564,7 @@ def cmd_confirm(task_id, action, reason=''):
             'remark': f'{"✅ 批准" if action == "approve" else "❌ 驳回"}: {reason}',
         })
         return tasks
+
     atomic_json_update(TASKS_FILE, modifier, [])
     _trigger_refresh()
     if rejected[0]:
@@ -559,6 +572,8 @@ def cmd_confirm(task_id, action, reason=''):
     else:
         log.info(f'✅ {task_id} confirm {action} → {result_state[0]}')
     _append_audit(task_id, _infer_agent_id_from_runtime(), f'confirm_{action}', 'PendingConfirm', result_state[0], reason)
+    if updated[0] is not None and result_state[0] == 'Review':
+        _enqueue_next_dispatch(updated[0])
 
 
 def cmd_progress(task_id, now_text, todos_pipe='', tokens=0, cost=0.0, elapsed=0):
@@ -863,6 +878,7 @@ def cmd_delegate(task_id, from_agent, to_agent, instruction, return_spec=''):
 
     sub_task_id = f'{task_id}-sub-{_short_uuid()}'
     org = STATE_ORG_MAP.get('Doing', to_agent)
+    created = [None]
 
     def modifier(tasks):
         sub_task = {
@@ -891,12 +907,15 @@ def cmd_delegate(task_id, from_agent, to_agent, instruction, return_spec=''):
             'updatedAt': now_iso(),
         }
         tasks.insert(0, sub_task)
+        created[0] = dict(sub_task)
         return tasks
 
     atomic_json_update(TASKS_FILE, modifier, [])
     _trigger_refresh()
     log.info(f'📋 委派 {sub_task_id}: {from_agent} → {to_agent} (depth={depth})')
     _append_audit(task_id, from_agent, 'delegate', to_agent, sub_task_id, instruction)
+    if created[0] is not None:
+        _enqueue_next_dispatch(created[0])
 
 
 def cmd_delegate_result(sub_task_id, result_json):
@@ -1021,12 +1040,95 @@ def cmd_queue_purge(keep=200):
     print(f'队列清理完成: {before} -> {after}（保留最近 {keep} 条）')
 
 
+def cmd_queue_ack(task_id, agent_id, status, note=''):
+    """Mark the first matching queued dispatch entry as dispatched/failed.
+
+    Used by the orchestrator (main session) after a sub-agent has been
+    spawned: dispatched on success, failed when the agent did not respond.
+    """
+    if status not in ('dispatched', 'failed'):
+        print(f'非法状态: {status}（仅 dispatched/failed）')
+        return
+    if not QUEUE_FILE.exists():
+        print('队列不存在')
+        return
+
+    updated = [False]
+
+    def modifier(queue):
+        if not isinstance(queue, list):
+            queue = []
+        for entry in queue:
+            if (
+                entry.get('status') == 'queued'
+                and entry.get('taskId') == task_id
+                and entry.get('agentId') == agent_id
+            ):
+                entry['status'] = status
+                entry['dispatchedAt'] = now_iso()
+                entry['dispatchNote'] = note or ('已派发' if status == 'dispatched' else '派发失败')
+                updated[0] = True
+                break
+        return queue
+
+    atomic_json_update(QUEUE_FILE, modifier, [])
+    if updated[0]:
+        print(f'队列条目已标记: {task_id}/{agent_id} -> {status}')
+    else:
+        print(f'未找到匹配的 queued 条目: {task_id}/{agent_id}')
+
+
+def _enqueue_next_dispatch(task):
+    """After a CLI state change, enqueue the next responsible agent.
+
+    Mirrors server.dispatch_for_state for the agent-driven path so the
+    orchestrator can keep consuming the queue without manual enqueue.
+    Terminal states and PendingConfirm produce no dispatch.
+    """
+    if not isinstance(task, dict):
+        return
+    state = task.get('state', '')
+    if state in ('Done', 'Cancelled', 'PendingConfirm'):
+        return
+    agent_id = _STATE_AGENT_MAP.get(state)
+    if agent_id is None and state in ('Doing', 'Next'):
+        agent_id = _ORG_AGENT_MAP.get(task.get('org', ''))
+    if not agent_id:
+        return
+    task_id = task.get('id', '')
+    title = str(task.get('title', ''))[:60]
+    entry = {
+        'at': now_iso(),
+        'agentId': agent_id,
+        'taskId': task_id,
+        'trigger': 'state-transition',
+        'message': f'📜 任务 {task_id}（{title}）状态为 {state}，请按职责处理。',
+        'status': 'queued',
+    }
+
+    def modifier(queue):
+        if not isinstance(queue, list):
+            queue = []
+        for q in queue:
+            if (
+                q.get('taskId') == task_id
+                and q.get('agentId') == agent_id
+                and q.get('status') == 'queued'
+            ):
+                return queue
+        queue.append(entry)
+        return queue[-200:]
+
+    atomic_json_update(QUEUE_FILE, modifier, [])
+    log.info(f'📮 状态推进自动入队: {task_id} -> {agent_id} ({state})')
+
+
 _CMD_MIN_ARGS = {
     'create': 6, 'state': 3, 'flow': 5, 'done': 2, 'block': 3, 'confirm': 3,
     'todo': 4, 'progress': 3,
     'memory': 4, 'task-memo': 4, 'shared-memo': 3,
     'delegate': 5, 'delegate-result': 3,
-    'task': 2, 'memo': 2, 'memory-view': 2, 'queue-purge': 1,
+    'task': 2, 'memo': 2, 'memory-view': 2, 'queue-purge': 1, 'queue-ack': 4,
 }
 
 if __name__ == '__main__':
@@ -1120,6 +1222,11 @@ if __name__ == '__main__':
             except ValueError:
                 keep = 200
         cmd_queue_purge(keep)
+    elif cmd == 'queue-ack':
+        note = ''
+        if len(args) > 4 and args[4] == '--note' and len(args) > 5:
+            note = args[5]
+        cmd_queue_ack(args[1], args[2], args[3], note)
     else:
         print(__doc__)
         sys.exit(1)
