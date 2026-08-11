@@ -79,10 +79,38 @@
 - 每个里程碑由独立「都察院」子 agent 审查 diff；Critical 与必须修清零才推进。
 - 文件 ≤500 行、函数 ≤120 行、嵌套 ≤3 层；不顺手改无关代码。
 - 提交信息用英文，单提交可独立 revert；里程碑过审后 commit + tag + push。
-## 8. 军机处队列（dispatch_queue）轮询
 
-- 看板手动下旨或 `/api/agent-wake` 会把请求写入 `data/dispatch_queue.json`（status=queued）。
-- 主会话（太子）在会话开始时与每次任务收尾后，检查队列：读取 queued 条目，
-  按 agentId 依次 spawn 对应角色（内容取 message），处理完把该条 status 改为 dispatched（含 at/dispatchedAt）。
-- 队列条目字段：`at`、`agentId`、`taskId`、`trigger`、`message`、`status`。
-- 未完成条目不得删除；处理失败改 status=failed 并记录原因。
+## 8. 军机处派发循环（dispatch 队列消费）
+
+- 扫描时机：会话开始时、每次任务收尾后、用户提出「看下队列 / 催办」时。
+- 扫描对象：`data/dispatch_queue.json` 中 status=queued 的条目，按 at 升序逐条处理，不并行。
+- 心跳条目（trigger=heartbeat 或 message 含「心跳检测」）：主会话直接改 status=dispatched，dispatchNote=「太子代确认在线」，不 spawn。
+- 委派子任务条目（taskId 以 `-sub-` 结尾）：按条目 delegation.to 派发对应角色，消息附 delegation.instruction 与 return_spec。
+- 常规条目：按 agentId 读取 `agents/<id>/SOUL.md`，spawn 子 agent（fork_turns=none），消息严格使用第 10 节模板。
+- 完成判定：子 agent 返回且看板状态有推进（progress/state/todo/flow 任一更新），条目标记 dispatched（记 dispatchedAt 与 dispatchNote）；无推进或子 agent 未响应，标记 failed（记原因，保留条目）。
+- 队列维护：dispatched/failed 条目保留最近 200 条，更早的用维护命令清理（M7 提供）。
+
+## 9. 子 agent 行为契约（派发消息必读）
+
+接到派发消息后按顺序执行，不得跳步：
+
+1. 读任务：`python scripts/kanban_update.py task <任务ID>`（M7 提供；此前直接读 `data/tasks_source.json` 中对应条目）。
+2. 读上下文：`data/task_memory/<任务ID>.json` 的 context_chain（决策链）；存在则必须参考，不存在则跳过。
+3. 按角色 SOUL 职责执行；需要协作时绝不直接联系其他 agent，一切通过看板状态与 task_memo 传递。
+4. 写回看板：只用 kanban_update.py 的 state/flow/progress/todo/done 命令，禁止手改 JSON。
+5. 产出文件落消息或任务中指定的输出目录，禁止修改项目代码与配置。
+6. 最终回复固定三行格式：做了什么 / 证据（文件路径或测试结果）/ 剩余风险。
+
+红线：不 spawn 其他 agent；不改项目代码；不读不改其他任务；不泄露密钥。
+
+## 10. 派发消息模板（主会话 spawn 时使用）
+
+```
+【三省六部派发】
+角色：<agentId>
+任务ID：<task_id>
+指令：<dispatch message 原文>
+项目路径：<项目绝对路径>
+请先执行 python scripts/kanban_update.py task <task_id> 读取任务，
+再按 agents/<id>/SOUL.md 职责执行；完成后按第 9 节契约回复。
+```
