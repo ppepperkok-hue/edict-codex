@@ -63,6 +63,10 @@ python -m pytest tests/ -q
 看板手动下旨或 `/api/agent-wake` 会把请求写入 `data/dispatch_queue.json`，太子在会话开始时与
 每次任务收尾后轮询该队列并派发。
 
+> **执行说明**：每个状态推进（create/state/done/delegate/confirm）都会自动把下一负责角色写入
+> 派发队列，主会话消费队列后按角色派发。真实子 agent 派发为实验特性：当前 Codex 环境中
+> spawn 的子 agent 可能不响应或行为失控（详见 DEV_PLAN ADR-015），不可用时由主会话代执行并记录。
+
 CLI 示例（角色子 agent 使用；`--help` 可查全部命令）：
 
 ```powershell

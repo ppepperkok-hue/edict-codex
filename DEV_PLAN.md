@@ -48,6 +48,8 @@
 | M7 | CLI 上下文工具：task/memo/memory-view/queue-purge | 完成 | v0.7.0 |
 | M8 | 角色模板与委派接入：12 份 SOUL 角色卡 + groups 文档 | 完成 | v0.8.0 |
 | M9 | 服务端适配与前端拉起：活动流融合、队列端点、start/stop.ps1 | 完成 | v0.9.0 |
+| M10 | 测试与端到端演练：自动入队闭环、queue-ack、委派测试、子 agent 实验 | 完成 | v0.10.0 |
+
 
 
 
@@ -69,6 +71,8 @@
 - ADR-012（M6）：心跳不再常驻轮询，队列中 trigger=heartbeat 条目由主会话消费时直接确认在线。
 - ADR-013（M8）：12 份 SOUL 统一为「角色卡 + 执行规范」：必读 task/memo/memory-view，CLI 写回，三行输出格式，委派经 delegate/delegate-result；groups 文档改为指向各角色卡。
 - ADR-014（M9）：活动流以 progress_log/flow_log/task_memory 为源（session JSONL 融合移除）；看板新增 /api/dispatch-queue；start.ps1/stop.ps1 一键启停（PID 落 data/）。
+- ADR-015（M10）：真实子 agent 派发实验结论——fork_turns=none 模式 5/5 次只回寒暄不执行任务；fork_turns=all 模式会递归 spawn 并篡改看板数据（取消任务、重建任务）。结论：当前 Codex 环境子 agent 不可靠，执行层以「主会话消费 dispatch 队列 + CLI 闭环」为准，子 agent 派发标记为实验特性。
+- ADR-016（M10）：CLI 状态推进（create/state/done/delegate/confirm-reject）自动将下一负责角色入队（去重、终态跳过），保证队列是唯一派发通道；queue-ack 供主会话确认派发结果。
 
 ## 审查记录
 
@@ -84,6 +88,7 @@
 | M7 | 2026-08-11 | 通过（5 个新测试；命令手动验证；86 全绿） | 已处置 |
 | M8 | 2026-08-11 | 通过（12 角色卡生成、残留清零、86 全绿） | 已处置 |
 | M9 | 2026-08-11 | 通过（89 全绿；start/stop 实测；页面与队列/活动端点 200） | 已处置 |
+| M10 | 2026-08-11 | 部分通过（队列闭环/自动入队/委派测试 97 全绿；真实子 agent 实验失败，见 ADR-015） | 已处置 |
 
 | M4 | 2026-08-10 | 未单独留档，由 M5 终审覆盖复核 v0.4.0→v0.5.0 全部变更 | M5 终审覆盖 |
 
