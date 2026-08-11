@@ -150,3 +150,13 @@ def test_done_enqueues_shangshu_and_terminal_does_not(tmp_path, monkeypatch):
         q.get("taskId") == "JJC-FLOW-02" and q.get("agentId") == "taizi" and q.get("status") == "queued"
         for q in queue_after
     )
+
+
+def test_create_enqueues_zhongshu(tmp_path, monkeypatch):
+    _install(tmp_path, monkeypatch)
+    kb.cmd_create("JJC-FLOW-03", "创建即派发验证", "Zhongshu", "中书省", "中书令")
+    queue = json.loads(kb.QUEUE_FILE.read_text(encoding="utf-8"))
+    assert any(
+        q.get("taskId") == "JJC-FLOW-03" and q.get("agentId") == "zhongshu" and q.get("status") == "queued"
+        for q in queue
+    )

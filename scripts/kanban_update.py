@@ -303,6 +303,7 @@ def cmd_create(task_id, title, state, org, official, remark=None):
     actual_org = STATE_ORG_MAP.get(state, org)
     clean_remark = _sanitize_remark(remark) if remark else f"下旨：{title}"
     rejected = [False]
+    created = [None]
     def modifier(tasks):
         existing = next((t for t in tasks if t.get('id') == task_id), None)
         if existing:
@@ -313,14 +314,16 @@ def cmd_create(task_id, title, state, org, official, remark=None):
             if existing.get('state') not in (None, '', 'Inbox', 'Pending'):
                 log.warning(f'任务 {task_id} 已存在 (state={existing["state"]})，将被覆盖')
         tasks = [t for t in tasks if t.get('id') != task_id]
-        tasks.insert(0, {
+        new_task = {
             "id": task_id, "title": title, "official": official,
             "org": actual_org, "state": state,
             "now": clean_remark[:60] if remark else f"已下旨，等待{actual_org}接旨",
             "eta": "-", "block": "无", "output": "", "ac": "",
             "flow_log": [{"at": now_iso(), "from": "皇上", "to": actual_org, "remark": clean_remark}],
             "updatedAt": now_iso()
-        })
+        }
+        tasks.insert(0, new_task)
+        created[0] = dict(new_task)
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
     _trigger_refresh()
@@ -329,6 +332,8 @@ def cmd_create(task_id, title, state, org, official, remark=None):
         return
     log.info(f'✅ 创建 {task_id} | {title[:30]} | state={state}')
     _append_audit(task_id, _infer_agent_id_from_runtime(), 'create', None, state, title)
+    if created[0] is not None:
+        _enqueue_next_dispatch(created[0])
 
 
 # ── 状态流转合法性校验 ──
