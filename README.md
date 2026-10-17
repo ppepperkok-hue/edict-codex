@@ -1,11 +1,13 @@
+<div align="center">
+
 # 三省六部 · Edict-Codex
 
 <!-- moe-counter:start -->
-<p align="center">
-  <a href="https://github.com/journey-ad/Moe-Counter"><img src="https://count.getloli.com/get/@ppepperkok-hue.edict-codex?theme=asoul" alt="README views" width="360" /></a>
-  <br /><sub>README views · Image requests, not unique visitors.</sub>
-</p>
+<a href="https://github.com/journey-ad/Moe-Counter"><img src="https://count.getloli.com/get/@ppepperkok-hue.edict-codex?theme=asoul" alt="README views" width="360" /></a>
+<br /><sub>README 阅读 · 按图片请求计数</sub>
 <!-- moe-counter:end -->
+
+</div>
 
 > 将 [cft0808/edict](https://github.com/cft0808/edict)（MIT License）复刻为
 > Codex 驱动的多 Agent 任务协作系统：服务端看板 + 三省六部编排协议 + 数据与代码双回滚保障。
