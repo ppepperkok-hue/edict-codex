@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        # The suite and scripts are standard-library only; pytest is the single
+        # test dependency. requirements.txt lists numpy for an optional module
+        # that is not imported anywhere and is not needed for these tests.
+        run: python -m pip install "pytest>=8,<10"
+
+      - name: Byte-compile sources and tests
+        run: python -m compileall -q scripts tests
+
+      - name: Run test suite
+        # no:cacheprovider keeps .pytest_cache out of the tree so the isolation
+        # check below observes only side effects the tests themselves produce.
+        run: python -m pytest tests/ -q -p no:cacheprovider
+
+      - name: Verify tests left tracked files untouched
+        # data/* is gitignored, so this guard cannot see a write under data/.
+        # The isolation regression guard is tests/test_data_isolation.py, which
+        # snapshots those runtime files and runs representative tests in a
+        # subprocess. This step still catches edits to tracked files and new
+        # untracked, non-ignored artifacts.
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            echo "::error::test run modified the working tree"
+            exit 1
+          fi
