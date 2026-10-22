@@ -11,7 +11,7 @@ Endpoints:
   GET  /api/model-change-log   → data/model_change_log.json
   GET  /api/last-result        → data/last_model_change_result.json
 """
-import json, pathlib, subprocess, sys, threading, argparse, datetime, logging, re, os, socket, shutil
+import json, pathlib, subprocess, sys, threading, argparse, datetime, logging, re, os, socket, shutil, ipaddress
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -45,6 +45,7 @@ from channels import get_channel, get_channel_info, CHANNELS as NOTIFICATION_CHA
 MAX_REQUEST_BODY = 1 * 1024 * 1024  # 1 MB
 ALLOWED_ORIGIN = None  # Set via --cors; None means restrict to localhost
 _DASHBOARD_PORT = 7891  # Updated at startup from --port arg
+_BIND_HOST = '127.0.0.1'  # Updated at startup from --host arg
 _DEFAULT_ORIGINS = {
     'http://127.0.0.1:7891', 'http://localhost:7891',
     'http://127.0.0.1:5173', 'http://localhost:5173',  # Vite dev server
@@ -88,6 +89,238 @@ def cors_headers(h):
     h.send_header('Access-Control-Allow-Origin', origin)
     h.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     h.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+
+_ALLOWED_ORIGIN_SCHEMES = ('http', 'https')
+_SAFE_FETCH_SITES = ('', 'none', 'same-origin')
+_DEFAULT_PORTS = {'http': 80, 'https': 443}
+_LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1')
+_WILDCARD_BIND_HOSTS = ('', '0.0.0.0', '::', '[::]', '*')
+
+
+def _canonical_host(value):
+    return (value or '').strip().lower()
+
+
+def _host_and_port(authority):
+    """Split a lowercase ``host[:port]`` authority into ``(host, port)``."""
+    authority = _canonical_host(authority)
+    if not authority:
+        return '', None
+    if authority.startswith('['):
+        end = authority.find(']')
+        if end == -1:
+            return authority, None
+        host = authority[1:end]
+        tail = authority[end + 1:]
+        return host, (tail[1:] if tail.startswith(':') else None)
+    host, sep, port = authority.partition(':')
+    return host, (port if sep else None)
+
+
+def _authority_string(host, port):
+    host = _canonical_host(host).strip('[]')
+    return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
+
+
+def _bare_authority(host):
+    host = _canonical_host(host).strip('[]')
+    return f'[{host}]' if ':' in host else host
+
+
+def _request_authority(headers):
+    """Return the single HTTP ``Host`` authority, or ``''`` when unusable.
+
+    A request with zero or several ``Host`` headers is ambiguous, and a proxy
+    chain that forwards two of them is not a meaningful authority.
+    """
+    values = headers.get_all('Host') or []
+    if len(values) != 1:
+        return ''
+    authority = _canonical_host(values[0])
+    if not authority or any(ch in authority for ch in ' /\\@'):
+        return ''
+    host, port = _host_and_port(authority)
+    if not host:
+        return ''
+    if port is not None and not port.isdigit():
+        return ''
+    return authority
+
+
+def _origin_authorities(origin):
+    """Authorities an explicitly configured origin may legitimately arrive as."""
+    parsed = urlparse(_canonical_host(origin).rstrip('/'))
+    if parsed.scheme not in _ALLOWED_ORIGIN_SCHEMES or not parsed.netloc:
+        return set()
+    host, port = _host_and_port(parsed.netloc)
+    if not host:
+        return set()
+    default_port = _DEFAULT_PORTS[parsed.scheme]
+    if port is None:
+        return {_authority_string(host, default_port), _bare_authority(host)}
+    authorities = {_authority_string(host, port)}
+    if port == str(default_port):
+        authorities.add(_bare_authority(host))
+    return authorities
+
+
+def _configured_origins():
+    origins = set(_DEFAULT_ORIGINS)
+    if ALLOWED_ORIGIN:
+        origins.add(ALLOWED_ORIGIN)
+    return origins
+
+
+def _bind_port_variants(host, port):
+    authorities = {_authority_string(host, port)}
+    if str(port) in ('80', '443'):
+        authorities.add(_bare_authority(host))
+    return authorities
+
+
+def _local_interface_hosts():
+    """Best-effort local interface addresses for a wildcard bind.
+
+    Only used when the server listens on ``0.0.0.0``/``::``; a failure here
+    narrows the accepted ``Host`` set (fail-closed), never widens it.
+    """
+    hosts = set()
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None)
+    except OSError:
+        return hosts
+    for info in infos:
+        address = str(info[4][0]).split('%')[0]
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        hosts.add(address)
+    return hosts
+
+
+def _server_address(server):
+    """Return the socket the request actually arrived on ``(host, port)``."""
+    address = getattr(server, 'server_address', None)
+    try:
+        return str(address[0]), int(address[1])
+    except (TypeError, IndexError, ValueError):
+        return _BIND_HOST, _DASHBOARD_PORT
+
+
+def _host_authorities(server=None):
+    """Return ``(authoritative host:port set, wildcard_bind)``.
+
+    The set is derived from the server's real bind address plus the explicitly
+    configured origins (``--cors`` and the local dev list). The request ``Host``
+    is never itself evidence: a DNS-rebound page sends ``Origin == Host ==
+    attacker.example`` and only the socket address is authoritative.
+    """
+    bind_host, bind_port = _server_address(server)
+    bind = _canonical_host(bind_host).strip('[]')
+    wildcard = bind in _WILDCARD_BIND_HOSTS
+    names = set()
+    if wildcard:
+        names.update(_LOOPBACK_HOSTS)
+        names.update(_local_interface_hosts())
+    elif bind in _LOOPBACK_HOSTS:
+        names.update(_LOOPBACK_HOSTS)
+    elif bind:
+        names.add(bind)
+    authorities = set()
+    for name in names:
+        authorities |= _bind_port_variants(name, bind_port)
+    for origin in _configured_origins():
+        authorities |= _origin_authorities(origin)
+    return authorities, (wildcard, bind_port)
+
+
+def _host_trusted(authority, server=None):
+    """True only for an authoritative Host for this socket."""
+    if not authority:
+        return False
+    authorities, (wildcard, bind_port) = _host_authorities(server)
+    if authority in authorities:
+        return True
+    if not wildcard:
+        return False
+    # A wildcard bind legitimately answers on local interface IPs; a literal
+    # IP cannot be attacker-controlled DNS, so accepting it keeps LAN access
+    # working while still rejecting rebound hostnames.
+    host, port = _host_and_port(authority)
+    if str(port) != str(bind_port):
+        return False
+    try:
+        return ipaddress.ip_address(host).version in (4, 6)
+    except ValueError:
+        return False
+
+
+def _origin_trusted(headers, server=None) -> bool:
+    """Fail-closed CSRF gate for mutating requests.
+
+    Browsers attach ``Origin`` to every cross-origin POST, including "simple"
+    text/plain form posts that skip the CORS preflight, so an unguarded write
+    API is reachable from any web page. A mutation is trusted only when:
+
+    - the ``Host`` names the socket the request arrived on (the actual bind
+      address or an explicitly configured origin's authority), and
+    - its origin was explicitly allowed (``--cors`` or the local dev list) or
+      equals that authoritative ``Host``, and
+    - the browser did not announce ``cross-site``.
+
+    An explicitly allowed origin may be ``same-site`` rather than strict
+    same-origin: a Vite page on ``127.0.0.1:5173`` and the dashboard on
+    ``127.0.0.1:7891`` share the site ``127.0.0.1`` (loops and private domains
+    ignore the port), and browsers therefore report ``Sec-Fetch-Site:
+    same-site`` for that documented pairing. ``same-site`` alone grants
+    nothing: any other local port stays non-allowlisted and is refused.
+
+    ``X-Forwarded-Host`` is deliberately ignored: it is client-forgeable and
+    only a trusted-proxy configuration could make it meaningful, which this
+    server has none of. Proxy deployments must preserve the original ``Host``
+    and declare the public origin with ``--cors``.
+
+    Non-browser callers (kanban CLI, curl, local agent scripts) send no
+    ``Origin`` at all and stay inside the local trust boundary.
+    """
+    origin = (headers.get('Origin') or '').strip()
+    fetch_site = (headers.get('Sec-Fetch-Site') or '').strip().lower()
+    if not origin:
+        return fetch_site in _SAFE_FETCH_SITES
+    if fetch_site == 'cross-site':
+        # No allowlist entry can make a cross-site browser POST legitimate: a
+        # page actually loaded from an allowed origin reports same-site or
+        # same-origin, never cross-site.
+        return False
+    normalized = origin.rstrip('/').lower()
+    if normalized == 'null':
+        return False
+    parsed = urlparse(normalized)
+    if parsed.scheme not in _ALLOWED_ORIGIN_SCHEMES or not parsed.netloc:
+        return False
+    request_authority = _request_authority(headers)
+    if not _host_trusted(request_authority, server):
+        log.warning(f'⛔ 不可信 Host 头: {request_authority or "(缺失/重复)"}')
+        return False
+    allowed_origin = (ALLOWED_ORIGIN or '').rstrip('/').lower()
+    if (allowed_origin and normalized == allowed_origin) or normalized in _DEFAULT_ORIGINS:
+        # Explicit trust survives ``same-site`` (Vite on :5173, --cors proxied
+        # origins); the authoritative Host check above already ran.
+        return True
+    if fetch_site not in _SAFE_FETCH_SITES:
+        return False
+    return parsed.netloc == request_authority
+
+
+def _is_json_mutation_body(headers, length: int) -> bool:
+    """Mutations are JSON-only; HTML form encodings are not a supported channel."""
+    declared = (headers.get('Content-Type') or '').strip()
+    if not declared:
+        return length == 0
+    media_type = declared.split(';')[0].strip().lower()
+    return media_type == 'application/json' or media_type.endswith('+json')
 
 
 def _iter_task_data_dirs():
@@ -282,6 +515,21 @@ def update_task_todos(task_id, todos):
     return {'ok': True, 'message': f'{task_id} todos 已更新'}
 
 
+def _is_path_within_roots(path, roots):
+    """Return True only when *path* resolves to *roots* or their descendants."""
+    try:
+        resolved_path = pathlib.Path(path).resolve()
+        for root in roots:
+            try:
+                resolved_path.relative_to(pathlib.Path(root).resolve())
+                return True
+            except ValueError:
+                continue
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return False
+
+
 def read_skill_content(agent_id, skill_name):
     """Read SKILL.md content for a specific skill."""
     # 输入校验：防止路径遍历
@@ -298,7 +546,7 @@ def read_skill_content(agent_id, skill_name):
     skill_path = pathlib.Path(sk.get('path', '')).resolve()
     # 路径遍历保护：确保路径在项目目录下
     allowed_roots = (BASE.parent.resolve(),)
-    if not any(str(skill_path).startswith(str(root)) for root in allowed_roots):
+    if not _is_path_within_roots(skill_path, allowed_roots):
         return {'ok': False, 'error': '路径不在允许的目录范围内'}
     if not skill_path.exists():
         return {'ok': True, 'name': skill_name, 'agent': agent_id, 'content': '(SKILL.md 文件不存在)', 'path': str(skill_path)}
@@ -383,23 +631,23 @@ def add_remote_skill(agent_id, skill_name, source_url, description=''):
         elif source_url.startswith('file://'):
             # file:// URL 格式
             local_path = pathlib.Path(source_url[7:]).resolve()
+            # 路径遍历防护：先判定允许范围再判定存在性，避免通过不同报错泄露越界路径是否存在
+            allowed_roots = (BASE.parent.resolve(),)
+            if not _is_path_within_roots(local_path, allowed_roots):
+                return {'ok': False, 'error': '路径不在允许的目录范围内'}
             if not local_path.exists():
                 return {'ok': False, 'error': f'本地文件不存在: {local_path}'}
-            # 路径遍历防护：与本地路径分支一致，确保在允许范围内
-            allowed_roots = (BASE.parent.resolve(),)
-            if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
-                return {'ok': False, 'error': '路径不在允许的目录范围内'}
             content = local_path.read_text(encoding='utf-8')
         
         elif source_url.startswith('/') or source_url.startswith('.'):
             # 本地绝对或相对路径
             local_path = pathlib.Path(source_url).resolve()
+            # 路径遍历防护：同上，先判范围再判存在
+            allowed_roots = (BASE.parent.resolve(),)
+            if not _is_path_within_roots(local_path, allowed_roots):
+                return {'ok': False, 'error': '路径不在允许的目录范围内'}
             if not local_path.exists():
                 return {'ok': False, 'error': f'本地文件不存在: {local_path}'}
-            # 路径遍历防护
-            allowed_roots = (BASE.parent.resolve(),)
-            if not any(str(local_path).startswith(str(root)) for root in allowed_roots):
-                return {'ok': False, 'error': '路径不在允许的目录范围内'}
             content = local_path.read_text(encoding='utf-8')
         
         else:
@@ -1040,6 +1288,12 @@ def _guard_agent_write(agent_id: str, path: str, body: dict):
     Requests without the header are treated as dashboard/CLI (privileged).
     Requests with the header must name a known agent allowed for the action.
     Returns an error dict (HTTP 403) or None when allowed.
+
+    The "dashboard/CLI" branch is only reachable behind the do_POST CSRF gate
+    (``_origin_trusted``): a browser request from a foreign origin is refused
+    before it gets here, so a headerless caller is either the same-origin
+    dashboard or a local process. ``X-Agent-ID`` itself is an unauthenticated
+    claim — it narrows privileges, it never grants the dashboard channel.
     """
     if not agent_id:
         if path in _AGENT_ONLY_WRITE_PATHS:
@@ -2283,9 +2537,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path.rstrip('/')
+        # ── 跨站写请求防护（fail-closed） ──
+        if not _origin_trusted(self.headers, self.server):
+            log.warning(f'⛔ 跨站写请求已拒绝: {p} origin={self.headers.get("Origin", "-")}')
+            self.send_json({'ok': False, 'error': 'cross-origin write rejected'}, 403)
+            return
         length = int(self.headers.get('Content-Length', 0))
         if length > MAX_REQUEST_BODY:
             self.send_json({'ok': False, 'error': f'Request body too large (max {MAX_REQUEST_BODY} bytes)'}, 413)
+            return
+        if not _is_json_mutation_body(self.headers, length):
+            self.send_json({'ok': False, 'error': 'Content-Type must be application/json'}, 415)
             return
         raw = self.rfile.read(length) if length else b''
         try:
@@ -2651,9 +2913,10 @@ def main():
     parser.add_argument('--cors', default=None, help='Allowed CORS origin (default: reflect request Origin header)')
     args = parser.parse_args()
 
-    global ALLOWED_ORIGIN, _DASHBOARD_PORT, _DEFAULT_ORIGINS
+    global ALLOWED_ORIGIN, _DASHBOARD_PORT, _DEFAULT_ORIGINS, _BIND_HOST
     ALLOWED_ORIGIN = args.cors
     _DASHBOARD_PORT = args.port
+    _BIND_HOST = args.host
     _DEFAULT_ORIGINS = _DEFAULT_ORIGINS | {
         f'http://127.0.0.1:{args.port}', f'http://localhost:{args.port}',
     }

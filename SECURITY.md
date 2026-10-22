@@ -52,6 +52,41 @@
 - 使用反向代理（如 Nginx）时启用 HTTPS
 - 为 LLM API Key 设置最小必要权限
 
+## 看板写接口的信任边界
+
+写接口（`POST /api/*`）按 fail-closed 处理，只接受以下来源：
+
+- **同源请求**：浏览器 `Origin` 与本次请求的 `Host` 一致，且该 `Host` 必须是服务器的权威地址
+  （实际 bind 地址 `--host`/`--port`，或 `--cors` 显式声明的 origin 的 authority）；
+- **白名单来源**：`_DEFAULT_ORIGINS`（含 Vite dev `:5173`）或启动参数 `--cors <origin>` 指定的来源；
+- **本地无 Origin 客户端**：`kanban_update.py`、`curl`、Codex 会话内的脚本（同机进程）；
+- **携带有效 token 的客户端**：先 `POST /api/auth/setup` 设密码再用 `/api/auth/login` 取 token，
+  以 `Authorization: Bearer <token>` 或 `edict_token` Cookie 提交。
+
+`Host` 本身不被信任：DNS rebinding 页面会同时发出 `Origin` 与 `Host` 都为攻击者域名的请求，
+所以仅比较两者相等会被绕过。权威 `Host` 集合由服务器的真实 socket 地址（`server_address`）、
+loopback 别名与 `--cors`/内置 origin 的 authority 推导；`--host 0.0.0.0` 时额外接受任意
+IP 字面量（IP 不受攻击者 DNS 控制），但域名仍被拒绝。`X-Forwarded-Host` 一律不参与判定
+（客户端可伪造，仓库也没有可信代理配置）。
+
+带 `Origin` 的写请求中，以下情形一律拒绝：`Host` 不是权威地址（含 `Host` 缺失或重复）、
+`Origin` 不在白名单且与权威 `Host` 不同源、`Sec-Fetch-Site: cross-site`、
+`Origin: null`（沙箱 iframe / `file://` 页面）、以及非 `application/json` 的请求体
+（`text/plain`、`application/x-www-form-urlencoded`、`multipart/form-data`）。
+
+`Sec-Fetch-Site: same-site` 只在 `Origin` 命中白名单（Vite `:5173` 或 `--cors`）时放行：
+loopback 等站点的「site」忽略端口，所以 `127.0.0.1:5173` 的 Vite 页面写 `127.0.0.1:7891` 时
+浏览器报的就是 `same-site`，这一对是文档化的合法组合。`same-site` 本身不产生信任：
+白名单之外的同站来源（例如同机另一个端口的页面）仍被拒绝，且 `Sec-Fetch-Site: cross-site`
+即使 `Origin` 在白名单中也拒绝。
+
+反向代理部署时需显式 `--cors https://你的域名`，并让代理保留原始 `Host`（常见默认行为）；
+代理若把 `Host` 改写成上游地址（如 `127.0.0.1:7891`）同样可用，因为那就是权威 bind 地址。
+两种情况下都不要依赖 `X-Forwarded-Host`。
+
+残余风险：`X-Agent-ID` 是未认证的声明，只能缩小权限、不能证明身份；同机进程仍可直接读写
+`data/*.json`。需要更强的 agent 身份认证时，应引入独立的每 agent 凭据（当前仓库没有该凭据来源）。
+
 ## 致谢
 
 我们感谢所有帮助提升三省六部系统安全性的安全研究者。

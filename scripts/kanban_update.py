@@ -940,14 +940,24 @@ def cmd_delegate(task_id, from_agent, to_agent, instruction, return_spec=''):
         _enqueue_next_dispatch(created[0])
 
 
+AGENT_CONFIG_FILE = _BASE / 'data' / 'agent_config.json'
+
+
 def _can_delegate(from_agent, to_agent):
     """Check the allowAgents permission matrix before delegating.
 
     Mirrors can_dispatch_to() from the upstream design: only agents whose
-    allowAgents list contains the target may delegate to it. Execution
-    ministries have empty allowAgents, which terminates recursion.
+    allowAgents list contains the target may delegate to it. Recursion is
+    bounded by MAX_DELEGATION_DEPTH and the circular-path guard; the matrix
+    only narrows who may call whom (ministries report back to shangshu).
+
+    Reads AGENT_CONFIG_FILE instead of a hardcoded path so tests and
+    EDICT_HOME deployments can point at an isolated config. A missing
+    config fails closed: nothing is delegated without an explicit matrix.
     """
-    cfg = atomic_json_read(_BASE / 'data' / 'agent_config.json', {})
+    if not AGENT_CONFIG_FILE.exists():
+        return False, f'委派配置不存在: {AGENT_CONFIG_FILE}'
+    cfg = atomic_json_read(AGENT_CONFIG_FILE, {})
     agents = cfg.get('agents') or []
     record = next((a for a in agents if a.get('id') == from_agent), None)
     if not record:

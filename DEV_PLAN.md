@@ -80,6 +80,20 @@
   模拟门下省派发时子 agent 自动按 menxia 技能内容回答四维审议/准奏封驳/必读命令。
   技能正文指向 `agents/<role>/SOUL.md` 保持单一事实源；技能/配置 JSON 读写统一显式
   UTF-8（修复 GBK 解码崩溃，`tests/test_cwe22_file_url.py` 新增回归测试）。
+- ADR-018（安全修复）：写操作增加 fail-closed 跨站防护——`dashboard/server.py` 的
+  `do_POST` 先过 `_origin_trusted`（Origin 必须与 Host 同源、命中 `--cors` 或
+  `_DEFAULT_ORIGINS`，且 `Sec-Fetch-Site` 不得为 cross-site；`same-site` 仅对命中白名单的
+  Origin 放行——Vite `:5173`→`:7891` 在浏览器里就是 same-site；`Origin: null` 一律拒绝），
+  再要求 `Content-Type: application/json`（含 `+json`）。浏览器跨站
+  text/plain「简单请求」不再能触达写 API；无 Origin 的本地 CLI/agent/带 token 客户端、
+  同源看板、Vite 5173 与 `--cors` 白名单保持可用。
+  Host 校验追加权威来源：`_host_authorities` 只认实际 socket 地址（`server_address`，
+  即 `--host/--port`）、loopback 别名、`--cors`/内置 origin 的 authority；`--host 0.0.0.0`
+  时额外允许 IP 字面量。故 DNS rebinding 下 `Origin == Host == evil.example` 不再放行，
+  `X-Forwarded-Host` 不参与判定；反向代理保留 Host 或改写为上游地址均可配合 `--cors`。
+  ADR-009 的「无头=看板/CLI 特权」语义不变，但只在跨站门禁之后生效：`X-Agent-ID` 是
+  未认证的声明，只能收紧权限、不能换取看板通道。本地进程身份（`X-Agent-ID` 可被同机
+  进程伪造）仍属残余风险，仓库内没有每 agent 凭据来源，不擅自发明机制。
 
 ## 审查记录
 

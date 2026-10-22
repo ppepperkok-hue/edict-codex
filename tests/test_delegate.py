@@ -20,16 +20,22 @@ def _install(tmp_path, monkeypatch):
     monkeypatch.setattr(kb, "TASK_MEMORY_DIR", data / "task_memory")
     monkeypatch.setattr(kb, "MEMORY_DIR", data / "agent_memory")
     monkeypatch.setattr(kb, "QUEUE_FILE", data / "dispatch_queue.json")
+    # Mirror data/config.default.json: ministries may only report back to shangshu.
     cfg = {
         "agents": [
             {"id": "taizi", "allowAgents": ["zhongshu"]},
             {"id": "zhongshu", "allowAgents": ["menxia", "shangshu"]},
             {"id": "menxia", "allowAgents": ["shangshu", "zhongshu"]},
             {"id": "shangshu", "allowAgents": ["hubu", "libu", "bingbu", "xingbu", "gongbu", "libu_hr"]},
-            {"id": "bingbu", "allowAgents": []},
+            {"id": "hubu", "allowAgents": ["shangshu"]},
+            {"id": "bingbu", "allowAgents": ["shangshu"]},
         ]
     }
-    (data / "agent_config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    config_file = data / "agent_config.json"
+    config_file.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(kb, "AGENT_CONFIG_FILE", config_file)
+    # Keep unit tests hermetic: no background refresh subprocess against repo data.
+    monkeypatch.setattr(kb, "_trigger_refresh", lambda: None)
     return data
 
 
@@ -54,7 +60,7 @@ def test_delegate_creates_subtask_with_metadata(tmp_path, monkeypatch):
     assert sub["delegation"]["delegation_path"] == ["shangshu", "bingbu"]
 
 
-def test_delegate_rejects_circle(tmp_path, monkeypatch, capsys):
+def test_delegate_rejects_circle(tmp_path, monkeypatch, caplog):
     _install(tmp_path, monkeypatch)
     kb.cmd_create("JJC-CIRCLE-01", "测试循环委派防护", "Assigned", "尚书省", "尚书令")
     kb.cmd_delegate("JJC-CIRCLE-01", "shangshu", "bingbu", "指令1")
@@ -62,10 +68,13 @@ def test_delegate_rejects_circle(tmp_path, monkeypatch, capsys):
     sub = next(t for t in tasks if t.get("type") == "delegation")
     sub_id = sub["id"]
 
+    # bingbu -> shangshu is allowed by the matrix, so only the cycle guard
+    # (path [shangshu, bingbu, shangshu]) may reject this.
     kb.cmd_delegate(sub_id, "bingbu", "shangshu", "指令2")
     tasks = _load(tmp_path)
     delegations = [t for t in tasks if t.get("type") == "delegation"]
     assert len(delegations) == 1, "circular delegation must be rejected"
+    assert "循环委派" in caplog.text
 
 
 def test_delegate_result_writes_back_to_parent_memory(tmp_path, monkeypatch):
@@ -95,7 +104,7 @@ def test_delegate_enforces_allow_agents_matrix(tmp_path, monkeypatch, capsys):
     _install(tmp_path, monkeypatch)
     kb.cmd_create("JJC-PARENT-03", "权限矩阵委派验证", "Assigned", "尚书省", "尚书令")
 
-    # Leaf ministry must not delegate (empty allowAgents -> recursion stop).
+    # A ministry may only report back to shangshu; peer delegation is denied.
     kb.cmd_delegate("JJC-PARENT-03", "bingbu", "hubu", "越权委派")
     tasks = _load(tmp_path)
     delegations = [t for t in tasks if t.get("type") == "delegation"]
@@ -124,3 +133,28 @@ def test_delegate_subtask_enqueues_target_agent(tmp_path, monkeypatch):
     ]
     assert len(sub_entries) == 1, "delegation subtask must enqueue its target agent"
     assert "审查代码" in sub_entries[0]["message"]
+
+
+def test_can_delegate_reads_injected_config_path(tmp_path, monkeypatch):
+    """Regression: the matrix must come from kb.AGENT_CONFIG_FILE.
+
+    A hardcoded data/agent_config.json inside the checkout would ignore this
+    file and (since that path is gitignored) reject every delegation.
+    """
+    config_file = tmp_path / "custom_agent_config.json"
+    config_file.write_text(
+        json.dumps({"agents": [{"id": "alpha", "allowAgents": ["beta"]}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(kb, "AGENT_CONFIG_FILE", config_file)
+
+    assert kb._can_delegate("alpha", "beta") == (True, "OK")
+    assert kb._can_delegate("beta", "alpha")[0] is False
+    assert kb._can_delegate("stranger", "beta")[0] is False
+
+
+def test_can_delegate_fails_closed_without_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(kb, "AGENT_CONFIG_FILE", tmp_path / "missing.json")
+    ok, reason = kb._can_delegate("shangshu", "bingbu")
+    assert ok is False
+    assert "委派配置不存在" in reason

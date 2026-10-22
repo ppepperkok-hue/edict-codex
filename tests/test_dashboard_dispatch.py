@@ -28,6 +28,10 @@ def test_dispatch_records_queue_entry_and_scheduler_status(monkeypatch, tmp_path
 
     monkeypatch.setattr(srv, 'DATA', data_dir)
     monkeypatch.setattr(srv, '_ACTIVE_TASK_DATA_DIR', data_dir)
+    # dispatch writes through modify_tasks(); without this the refresh
+    # subprocess resolves the repo's scripts/data and rewrites ignored
+    # runtime state (data/live_status.json) during tests.
+    monkeypatch.setattr(srv, '_trigger_refresh', lambda: None)
 
     class ImmediateThread:
         def __init__(self, target=None, daemon=None):
